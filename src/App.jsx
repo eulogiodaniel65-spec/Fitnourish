@@ -1147,10 +1147,8 @@ export default function App() {
           <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Cargando tus datos...</span>
         ) : errorDatos ? (
           <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.danger }}>Error al cargar: {errorDatos}</span>
-        ) : alumnos.length === 0 ? (
-          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>
-            {usuario.rol === "profesor" ? "Todavía no hay alumnos cargados." : "Todavía no tenés una rutina asignada."}
-          </span>
+        ) : usuario.rol === "alumno" && alumnos.length === 0 ? (
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Todavía no tenés una rutina asignada.</span>
         ) : usuario.rol === "profesor" ? (
           <ProfesorView alumnos={alumnos} setAlumnos={setAlumnos} usuario={usuario} />
         ) : (
