@@ -101,7 +101,7 @@ export async function fetchDiasDeAlumno(alumnoId) {
         targetWeight: de.peso_objetivo || "-",
         restSets: de.descanso_series_seg,
         restAfter: de.descanso_posterior_seg,
-        mediaLabel: de.ejercicios?.url_media || "Sin media",
+        mediaUrl: de.ejercicios?.url_media || null,
         done: !!reg,
         logWeight: reg?.peso_logrado || "",
         logReps: reg?.reps_logradas || "",
@@ -289,4 +289,61 @@ export async function crearAlumno({ nombre, email }) {
   const { data, error } = await registrarAlumno({ email, password, nombre });
   if (error) throw error;
   return { alumnoId: data.user?.id, password };
+}
+
+// ------------------------------------------------------------
+// Catálogo de ejercicios (reutilizable, con foto/video).
+// ------------------------------------------------------------
+
+export async function fetchCatalogoEjercicios() {
+  const { data, error } = await supabase
+    .from("ejercicios")
+    .select("id, nombre, grupo_muscular, url_media")
+    .order("nombre");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function crearEjercicioCatalogo({ nombre, grupoMuscular }) {
+  const { data, error } = await supabase
+    .from("ejercicios")
+    .insert({ nombre, grupo_muscular: grupoMuscular || null })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function agregarEjercicioADiaPorId({ dayId, ejercicioId, series, reps, pesoObjetivo, descansoSeries, descansoPosterior }) {
+  const { data, error } = await supabase
+    .from("dia_ejercicios")
+    .insert({
+      dia_id: dayId,
+      ejercicio_id: ejercicioId,
+      series,
+      reps,
+      peso_objetivo: pesoObjetivo,
+      descanso_series_seg: descansoSeries,
+      descanso_posterior_seg: descansoPosterior,
+    })
+    .select("id, series, reps, peso_objetivo, descanso_series_seg, descanso_posterior_seg, ejercicios ( id, nombre, url_media )")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function subirMediaEjercicio({ ejercicioId, file }) {
+  const ext = file.name.split(".").pop();
+  const path = `${ejercicioId}-${Date.now()}.${ext}`;
+  const { error: upError } = await supabase.storage.from("ejercicios-media").upload(path, file, { upsert: true });
+  if (upError) throw upError;
+  const { data: urlData } = supabase.storage.from("ejercicios-media").getPublicUrl(path);
+  const { data, error } = await supabase
+    .from("ejercicios")
+    .update({ url_media: urlData.publicUrl })
+    .eq("id", ejercicioId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
