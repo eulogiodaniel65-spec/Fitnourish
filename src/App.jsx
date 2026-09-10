@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut } from "lucide-react";
+import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil } from "lucide-react";
 import { supabase, obtenerUsuarioActual, cerrarSesion } from "./lib/supabaseClient";
 import * as api from "./lib/api";
 import Login from "./Login";
@@ -317,6 +317,426 @@ function CatalogoManager({ catalogo, setCatalogo }) {
   );
 }
 
+function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
+  const [plantillas, setPlantillas] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [nuevaPlantilla, setNuevaPlantilla] = useState("");
+  const [creandoPlantilla, setCreandoPlantilla] = useState(false);
+  const [diasPlantilla, setDiasPlantilla] = useState([]);
+  const [cargandoDias, setCargandoDias] = useState(false);
+  const [newDay, setNewDay] = useState({ nombre: "", foco: "" });
+  const [creandoDia, setCreandoDia] = useState(false);
+  const [newExercise, setNewExercise] = useState({ dayIdx: 0, ejercicioId: "__nuevo__", nuevoNombre: "", sets: "3", reps: "10", targetWeight: "", restSets: "60", restAfter: "90" });
+  const [asignarAlumnoId, setAsignarAlumnoId] = useState("");
+  const [asignando, setAsignando] = useState(false);
+  const [editandoNombre, setEditandoNombre] = useState(false);
+  const [nombreEdit, setNombreEdit] = useState("");
+  const [guardandoNombre, setGuardandoNombre] = useState(false);
+  const [eliminando, setEliminando] = useState(false);
+
+  useEffect(() => {
+    setEditandoNombre(false);
+  }, [selectedId]);
+
+  useEffect(() => {
+    api.fetchPlantillas().then(setPlantillas).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) { setDiasPlantilla([]); return; }
+    setCargandoDias(true);
+    api.fetchDiasDePlantilla(selectedId).then(setDiasPlantilla).catch(() => {}).finally(() => setCargandoDias(false));
+  }, [selectedId]);
+
+  const selected = plantillas.find((p) => p.id === selectedId);
+
+  const crear = async () => {
+    if (!nuevaPlantilla.trim()) return;
+    setCreandoPlantilla(true);
+    try {
+      const nueva = await api.crearPlantilla({ nombre: nuevaPlantilla });
+      setPlantillas((prev) => [...prev, nueva].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+      setSelectedId(nueva.id);
+      setNuevaPlantilla("");
+    } catch (err) {
+      alert("No se pudo crear la plantilla: " + err.message);
+    } finally {
+      setCreandoPlantilla(false);
+    }
+  };
+
+  const crearDia = async () => {
+    if (!newDay.nombre.trim() || !selectedId) return;
+    setCreandoDia(true);
+    try {
+      const dia = await api.agregarDiaAPlantilla({ rutinaId: selectedId, nombre: newDay.nombre, foco: newDay.foco });
+      setDiasPlantilla((prev) => [...prev, { dayId: dia.id, day: dia.nombre, focus: dia.foco || "", exercises: [] }]);
+      setNewDay({ nombre: "", foco: "" });
+    } catch (err) {
+      alert("No se pudo crear el día: " + err.message);
+    } finally {
+      setCreandoDia(false);
+    }
+  };
+
+  const addExercise = async () => {
+    const usandoNuevo = newExercise.ejercicioId === "__nuevo__";
+    if (usandoNuevo && !newExercise.nuevoNombre.trim()) return;
+    if (diasPlantilla.length === 0) return;
+    const day = diasPlantilla[newExercise.dayIdx];
+    try {
+      const nuevo = usandoNuevo
+        ? await api.agregarEjercicioADia({
+            dayId: day.dayId,
+            nombre: newExercise.nuevoNombre,
+            series: Number(newExercise.sets) || 1,
+            reps: newExercise.reps,
+            pesoObjetivo: newExercise.targetWeight || "-",
+            descansoSeries: Number(newExercise.restSets) || 60,
+            descansoPosterior: Number(newExercise.restAfter) || 90,
+          })
+        : await api.agregarEjercicioADiaPorId({
+            dayId: day.dayId,
+            ejercicioId: newExercise.ejercicioId,
+            series: Number(newExercise.sets) || 1,
+            reps: newExercise.reps,
+            pesoObjetivo: newExercise.targetWeight || "-",
+            descansoSeries: Number(newExercise.restSets) || 60,
+            descansoPosterior: Number(newExercise.restAfter) || 90,
+          });
+      const exObj = {
+        id: nuevo.id,
+        catalogId: nuevo.ejercicios?.id,
+        name: nuevo.ejercicios?.nombre || newExercise.nuevoNombre,
+        sets: nuevo.series,
+        reps: nuevo.reps,
+        targetWeight: nuevo.peso_objetivo,
+        restSets: nuevo.descanso_series_seg,
+        restAfter: nuevo.descanso_posterior_seg,
+        mediaUrl: nuevo.ejercicios?.url_media || null,
+      };
+      setDiasPlantilla((prev) =>
+        prev.map((d, idx) => (idx === newExercise.dayIdx ? { ...d, exercises: [...d.exercises, exObj] } : d))
+      );
+      setNewExercise({ ...newExercise, nuevoNombre: "", targetWeight: "" });
+    } catch (err) {
+      alert("No se pudo agregar el ejercicio: " + err.message);
+    }
+  };
+
+  const asignar = async () => {
+    if (!asignarAlumnoId || !selected) return;
+    setAsignando(true);
+    try {
+      const { rutina, dias } = await api.asignarPlantillaAAlumno({
+        rutinaPlantillaId: selectedId,
+        alumnoId: asignarAlumnoId,
+        nombreRutina: selected.nombre,
+      });
+      const nuevosDias = dias.map((d) => ({
+        day: d.day,
+        focus: d.focus,
+        dayId: d.dayId,
+        rpeBorg: null,
+        exercises: d.exercises.map((ex) =>
+          mkExercise(ex.id, ex.ejercicios?.nombre, ex.series, ex.reps, ex.peso_objetivo, ex.descanso_series_seg, ex.descanso_posterior_seg, ex.ejercicios?.url_media || null)
+        ),
+      }));
+      setAlumnos((prev) => prev.map((a) => (a.id === asignarAlumnoId ? { ...a, rutinaId: rutina.id, days: nuevosDias } : a)));
+      alert("Rutina asignada correctamente.");
+      setAsignarAlumnoId("");
+    } catch (err) {
+      alert("No se pudo asignar la plantilla: " + err.message);
+    } finally {
+      setAsignando(false);
+    }
+  };
+
+  const guardarNombre = async () => {
+    if (!nombreEdit.trim() || !selectedId) return;
+    setGuardandoNombre(true);
+    try {
+      const actualizado = await api.renombrarPlantilla({ rutinaId: selectedId, nombre: nombreEdit });
+      setPlantillas((prev) =>
+        prev.map((p) => (p.id === selectedId ? { ...p, nombre: actualizado.nombre } : p)).sort((a, b) => a.nombre.localeCompare(b.nombre))
+      );
+      setEditandoNombre(false);
+    } catch (err) {
+      alert("No se pudo renombrar la plantilla: " + err.message);
+    } finally {
+      setGuardandoNombre(false);
+    }
+  };
+
+  const eliminarPlantillaActual = async () => {
+    if (!selectedId || !selected) return;
+    if (!confirm(`¿Borrar la plantilla "${selected.nombre}"? Esto no afecta a los alumnos que ya la tengan asignada, solo elimina la plantilla en sí.`)) return;
+    setEliminando(true);
+    try {
+      await api.eliminarPlantilla(selectedId);
+      setPlantillas((prev) => prev.filter((p) => p.id !== selectedId));
+      setSelectedId(null);
+    } catch (err) {
+      alert("No se pudo borrar la plantilla: " + err.message);
+    } finally {
+      setEliminando(false);
+    }
+  };
+
+  return (
+    <div className="flex gap-6 w-full" style={{ minHeight: 480 }}>
+      <div className="w-56 shrink-0">
+        <div className="text-xs uppercase tracking-wider mb-3 flex items-center gap-2" style={{ color: COLORS.dim, fontFamily: "Inter" }}>
+          <Layers size={14} /> Plantillas
+        </div>
+        <div className="flex flex-col gap-1">
+          {plantillas.map((p) => (
+            <button
+              key={p.id}
+              onClick={() => setSelectedId(p.id)}
+              className="text-left px-3 py-2.5 rounded-md flex items-center justify-between transition-colors"
+              style={{
+                background: selectedId === p.id ? COLORS.surface2 : "transparent",
+                border: `1px solid ${selectedId === p.id ? COLORS.accent : "transparent"}`,
+                color: selectedId === p.id ? COLORS.text : COLORS.dim,
+              }}
+            >
+              <span style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 500 }}>{p.nombre}</span>
+              <ChevronRight size={14} />
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4 pt-4" style={{ borderTop: `1px solid ${COLORS.border}` }}>
+          <div style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim, marginBottom: 8 }}>Crear plantilla</div>
+          <div className="flex flex-col gap-2">
+            <input
+              placeholder="Nombre (ej: Hipertrofia 4 días)"
+              value={nuevaPlantilla}
+              onChange={(ev) => setNuevaPlantilla(ev.target.value)}
+              style={{ width: "100%", background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13, boxSizing: "border-box" }}
+            />
+            <button
+              onClick={crear}
+              disabled={creandoPlantilla}
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-md"
+              style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600, opacity: creandoPlantilla ? 0.6 : 1 }}
+            >
+              <Plus size={14} /> {creandoPlantilla ? "Creando..." : "Crear"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1">
+        {!selected ? (
+          <div style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>
+            Creá o seleccioná una plantilla para editarla.
+          </div>
+        ) : (
+        <>
+        {editandoNombre ? (
+          <div className="flex items-center gap-2">
+            <input
+              value={nombreEdit}
+              onChange={(ev) => setNombreEdit(ev.target.value)}
+              autoFocus
+              style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.accent}`, borderRadius: 6, padding: "6px 10px", fontFamily: "Inter", fontSize: 18, fontWeight: 600 }}
+            />
+            <button
+              onClick={guardarNombre}
+              disabled={guardandoNombre}
+              className="px-3 py-1.5 rounded-md"
+              style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600, opacity: guardandoNombre ? 0.6 : 1 }}
+            >
+              {guardandoNombre ? "Guardando..." : "Guardar"}
+            </button>
+            <button
+              onClick={() => setEditandoNombre(false)}
+              className="px-3 py-1.5 rounded-md"
+              style={{ background: COLORS.surface2, color: COLORS.dim, fontFamily: "Inter", fontSize: 13 }}
+            >
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 30, letterSpacing: 1, color: COLORS.text }}>{selected.nombre}</div>
+            <button
+              onClick={() => { setNombreEdit(selected.nombre); setEditandoNombre(true); }}
+              style={{ color: COLORS.dim }}
+              title="Renombrar"
+            >
+              <Pencil size={16} />
+            </button>
+            <button
+              onClick={eliminarPlantillaActual}
+              disabled={eliminando}
+              style={{ color: COLORS.danger, opacity: eliminando ? 0.6 : 1 }}
+              title="Borrar plantilla"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2 mt-3 mb-5 p-3 rounded-md" style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}` }}>
+          <Copy size={14} color={COLORS.accent} />
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Asignar esta plantilla a:</span>
+          <select
+            value={asignarAlumnoId}
+            onChange={(ev) => setAsignarAlumnoId(ev.target.value)}
+            style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+          >
+            <option value="">Elegir alumno...</option>
+            {alumnos.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={asignar}
+            disabled={asignando || !asignarAlumnoId}
+            className="px-3 py-1.5 rounded-md"
+            style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600, opacity: asignando || !asignarAlumnoId ? 0.6 : 1 }}
+          >
+            {asignando ? "Asignando..." : "Asignar"}
+          </button>
+        </div>
+
+        {cargandoDias ? (
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Cargando días...</span>
+        ) : (
+        <div className="flex flex-col gap-5">
+          {diasPlantilla.map((d, dayIdx) => (
+            <div key={d.dayId} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+              <div className="flex items-baseline gap-2 mb-3">
+                <span style={{ fontFamily: "Bebas Neue", fontSize: 18, color: COLORS.accent, letterSpacing: 1 }}>{d.day}</span>
+                <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>{d.focus}</span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {d.exercises.map((e) => (
+                  <div key={e.id} className="rounded-md px-3 py-2" style={{ background: COLORS.surface2 }}>
+                    <div className="flex items-center justify-between">
+                      <span style={{ fontFamily: "Inter", fontSize: 14, color: COLORS.text }}>{e.name}</span>
+                      <span style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: COLORS.dim }}>
+                        {e.sets}×{e.reps} · {e.targetWeight}
+                      </span>
+                    </div>
+                    <div className="mt-2">
+                      <MediaBox url={e.mediaUrl} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          {diasPlantilla.length > 0 && (
+            <div style={{ background: COLORS.surface, border: `1px dashed ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+              <div style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim, marginBottom: 10 }}>Agregar ejercicio</div>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  value={newExercise.dayIdx}
+                  onChange={(ev) => setNewExercise({ ...newExercise, dayIdx: Number(ev.target.value) })}
+                  style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+                >
+                  {diasPlantilla.map((d, idx) => (
+                    <option key={d.dayId} value={idx}>{d.day}</option>
+                  ))}
+                </select>
+                <select
+                  value={newExercise.ejercicioId}
+                  onChange={(ev) => setNewExercise({ ...newExercise, ejercicioId: ev.target.value })}
+                  style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13, flex: "1 1 180px" }}
+                >
+                  <option value="__nuevo__">+ Nuevo ejercicio...</option>
+                  {catalogo.map((e) => (
+                    <option key={e.id} value={e.id}>{e.nombre}</option>
+                  ))}
+                </select>
+                {newExercise.ejercicioId === "__nuevo__" && (
+                  <input
+                    placeholder="Nombre del ejercicio nuevo"
+                    value={newExercise.nuevoNombre}
+                    onChange={(ev) => setNewExercise({ ...newExercise, nuevoNombre: ev.target.value })}
+                    style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13, flex: "1 1 160px" }}
+                  />
+                )}
+                <input
+                  placeholder="Series"
+                  value={newExercise.sets}
+                  onChange={(ev) => setNewExercise({ ...newExercise, sets: ev.target.value })}
+                  style={{ width: 60, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+                />
+                <input
+                  placeholder="Reps"
+                  value={newExercise.reps}
+                  onChange={(ev) => setNewExercise({ ...newExercise, reps: ev.target.value })}
+                  style={{ width: 70, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+                />
+                <input
+                  placeholder="Peso objetivo"
+                  value={newExercise.targetWeight}
+                  onChange={(ev) => setNewExercise({ ...newExercise, targetWeight: ev.target.value })}
+                  style={{ width: 100, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+                />
+                <input
+                  placeholder="Descanso series (s)"
+                  value={newExercise.restSets}
+                  onChange={(ev) => setNewExercise({ ...newExercise, restSets: ev.target.value })}
+                  style={{ width: 130, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+                />
+                <input
+                  placeholder="Descanso post (s)"
+                  value={newExercise.restAfter}
+                  onChange={(ev) => setNewExercise({ ...newExercise, restAfter: ev.target.value })}
+                  style={{ width: 130, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+                />
+                <button
+                  onClick={addExercise}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-md"
+                  style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600 }}
+                >
+                  <Plus size={14} /> Agregar
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ background: COLORS.surface, border: `1px dashed ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+            <div style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim, marginBottom: 10 }}>Agregar día</div>
+            <div className="flex flex-wrap gap-2">
+              <input
+                placeholder="Nombre del día (ej: Lunes)"
+                value={newDay.nombre}
+                onChange={(ev) => setNewDay({ ...newDay, nombre: ev.target.value })}
+                style={{ width: 200, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+              />
+              <input
+                placeholder="Foco (ej: Pecho / Tríceps)"
+                value={newDay.foco}
+                onChange={(ev) => setNewDay({ ...newDay, foco: ev.target.value })}
+                style={{ width: 220, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+              />
+              <button
+                onClick={crearDia}
+                disabled={creandoDia}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-md"
+                style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600, opacity: creandoDia ? 0.6 : 1 }}
+              >
+                <Plus size={14} /> {creandoDia ? "Creando..." : "Agregar día"}
+              </button>
+            </div>
+          </div>
+        </div>
+        )}
+        </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfesorView({ alumnos, setAlumnos, usuario }) {
   const [section, setSection] = useState("alumnos");
   const [selectedId, setSelectedId] = useState(alumnos[0]?.id);
@@ -492,6 +912,17 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
           <Users size={14} /> Mis alumnos
         </button>
         <button
+          onClick={() => setSection("plantillas")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+          style={{
+            fontFamily: "Inter", fontSize: 13, fontWeight: 600,
+            background: section === "plantillas" ? COLORS.accent : "transparent",
+            color: section === "plantillas" ? "#101215" : COLORS.dim,
+          }}
+        >
+          <Layers size={14} /> Plantillas
+        </button>
+        <button
           onClick={() => setSection("catalogo")}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
           style={{
@@ -506,6 +937,8 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
 
       {section === "catalogo" ? (
         <CatalogoManager catalogo={catalogo} setCatalogo={setCatalogo} />
+      ) : section === "plantillas" ? (
+        <PlantillasManager alumnos={alumnos} setAlumnos={setAlumnos} catalogo={catalogo} />
       ) : (
     <div className="flex gap-6 w-full" style={{ minHeight: 480 }}>
       <div className="w-56 shrink-0">

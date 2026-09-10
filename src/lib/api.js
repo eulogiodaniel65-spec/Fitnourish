@@ -347,3 +347,130 @@ export async function subirMediaEjercicio({ ejercicioId, file }) {
   if (error) throw error;
   return data;
 }
+
+// ------------------------------------------------------------
+// Plantillas de rutina (reutilizables, sin alumno asignado
+// hasta que se le "asignan" a uno).
+// ------------------------------------------------------------
+
+export async function fetchPlantillas() {
+  const { data, error } = await supabase
+    .from("rutinas")
+    .select("id, nombre")
+    .eq("es_plantilla", true)
+    .order("nombre");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchDiasDePlantilla(rutinaId) {
+  const { data: dias, error: eD } = await supabase
+    .from("dias")
+    .select("id, nombre, foco, orden")
+    .eq("rutina_id", rutinaId)
+    .order("orden");
+  if (eD) throw eD;
+
+  const result = [];
+  for (const d of dias || []) {
+    const { data: des, error: eDE } = await supabase
+      .from("dia_ejercicios")
+      .select("id, series, reps, peso_objetivo, descanso_series_seg, descanso_posterior_seg, orden, ejercicios ( id, nombre, url_media )")
+      .eq("dia_id", d.id)
+      .order("orden");
+    if (eDE) throw eDE;
+    result.push({
+      dayId: d.id,
+      day: d.nombre,
+      focus: d.foco || "",
+      exercises: (des || []).map((de) => ({
+        id: de.id,
+        catalogId: de.ejercicios?.id,
+        name: de.ejercicios?.nombre || "Ejercicio",
+        sets: de.series,
+        reps: de.reps,
+        targetWeight: de.peso_objetivo || "-",
+        restSets: de.descanso_series_seg,
+        restAfter: de.descanso_posterior_seg,
+        mediaUrl: de.ejercicios?.url_media || null,
+      })),
+    });
+  }
+  return result;
+}
+
+export async function crearPlantilla({ nombre }) {
+  const { data, error } = await supabase
+    .from("rutinas")
+    .insert({ alumno_id: null, nombre, activa: true, es_plantilla: true })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function agregarDiaAPlantilla({ rutinaId, nombre, foco }) {
+  const { data, error } = await supabase
+    .from("dias")
+    .insert({ rutina_id: rutinaId, nombre, foco })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function asignarPlantillaAAlumno({ rutinaPlantillaId, alumnoId, nombreRutina }) {
+  const dias = await fetchDiasDePlantilla(rutinaPlantillaId);
+
+  await supabase.from("rutinas").update({ activa: false }).eq("alumno_id", alumnoId).eq("activa", true);
+
+  const { data: nuevaRutina, error: eR } = await supabase
+    .from("rutinas")
+    .insert({ alumno_id: alumnoId, nombre: nombreRutina, activa: true, es_plantilla: false })
+    .select()
+    .single();
+  if (eR) throw eR;
+
+  const diasResultado = [];
+  for (const d of dias) {
+    const { data: nuevoDia, error: eD } = await supabase
+      .from("dias")
+      .insert({ rutina_id: nuevaRutina.id, nombre: d.day, foco: d.focus })
+      .select()
+      .single();
+    if (eD) throw eD;
+
+    const exercisesResultado = [];
+    for (const ex of d.exercises) {
+      const { data: nuevoDE, error: eDE } = await supabase
+        .from("dia_ejercicios")
+        .insert({
+          dia_id: nuevoDia.id,
+          ejercicio_id: ex.catalogId,
+          series: ex.sets,
+          reps: ex.reps,
+          peso_objetivo: ex.targetWeight,
+          descanso_series_seg: ex.restSets,
+          descanso_posterior_seg: ex.restAfter,
+        })
+        .select("id, series, reps, peso_objetivo, descanso_series_seg, descanso_posterior_seg, ejercicios ( id, nombre, url_media )")
+        .single();
+      if (eDE) throw eDE;
+      exercisesResultado.push(nuevoDE);
+    }
+    diasResultado.push({ dayId: nuevoDia.id, day: nuevoDia.nombre, focus: nuevoDia.foco || "", exercises: exercisesResultado });
+  }
+
+  return { rutina: nuevaRutina, dias: diasResultado };
+}
+
+export async function renombrarPlantilla({ rutinaId, nombre }) {
+  const { data, error } = await supabase.from("rutinas").update({ nombre }).eq("id", rutinaId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function eliminarPlantilla(rutinaId) {
+  const { error } = await supabase.from("rutinas").delete().eq("id", rutinaId);
+  if (error) throw error;
+}
