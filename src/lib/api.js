@@ -474,3 +474,27 @@ export async function eliminarPlantilla(rutinaId) {
   const { error } = await supabase.from("rutinas").delete().eq("id", rutinaId);
   if (error) throw error;
 }
+
+// ------------------------------------------------------------
+// Progreso: historial de RM por ejercicio, para graficar.
+// ------------------------------------------------------------
+
+export async function fetchHistorialRM(alumnoId) {
+  const { data, error } = await supabase
+    .from("rm_registros")
+    .select("id, ejercicio_id, rm_estimado, fecha, ejercicios ( nombre )")
+    .eq("alumno_id", alumnoId)
+    .order("fecha", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchHistorialSesiones(alumnoId) {
+  const { data, error } = await supabase
+    .from("sesiones")
+    .select("fecha, duracion_segundos, esfuerzo_percibido_borg")
+    .eq("alumno_id", alumnoId)
+    .order("fecha", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}

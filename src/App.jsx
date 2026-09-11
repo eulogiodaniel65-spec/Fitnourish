@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil } from "lucide-react";
+import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase, obtenerUsuarioActual, cerrarSesion } from "./lib/supabaseClient";
 import * as api from "./lib/api";
 import Login from "./Login";
@@ -747,6 +748,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
   const [newDay, setNewDay] = useState({ nombre: "", foco: "" });
   const [creandoDia, setCreandoDia] = useState(false);
   const [catalogo, setCatalogo] = useState([]);
+  const [vistaAlumno, setVistaAlumno] = useState("rutina");
   const selected = alumnos.find((a) => a.id === selectedId);
 
   useEffect(() => {
@@ -1007,7 +1009,37 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
           </div>
         ) : (
         <>
-        <div style={{ fontFamily: "Bebas Neue", fontSize: 30, letterSpacing: 1, color: COLORS.text }}>{selected.name}</div>
+        <div className="flex items-center gap-3 mb-4">
+          <div style={{ fontFamily: "Bebas Neue", fontSize: 30, letterSpacing: 1, color: COLORS.text }}>{selected.name}</div>
+          <div className="flex gap-1 p-1 rounded-full" style={{ background: COLORS.surface }}>
+            <button
+              onClick={() => setVistaAlumno("rutina")}
+              className="px-3 py-1 rounded-full"
+              style={{
+                fontFamily: "Inter", fontSize: 12, fontWeight: 600,
+                background: vistaAlumno === "rutina" ? COLORS.accent : "transparent",
+                color: vistaAlumno === "rutina" ? "#101215" : COLORS.dim,
+              }}
+            >
+              Rutina
+            </button>
+            <button
+              onClick={() => setVistaAlumno("progreso")}
+              className="px-3 py-1 rounded-full flex items-center gap-1"
+              style={{
+                fontFamily: "Inter", fontSize: 12, fontWeight: 600,
+                background: vistaAlumno === "progreso" ? COLORS.accent : "transparent",
+                color: vistaAlumno === "progreso" ? "#101215" : COLORS.dim,
+              }}
+            >
+              <TrendingUp size={12} /> Progreso
+            </button>
+          </div>
+        </div>
+        {vistaAlumno === "progreso" ? (
+          <ProgresoView alumnoId={selected.id} />
+        ) : (
+        <>
         <div className="mt-4 flex flex-col gap-5">
           {selected.days.map((d, dayIdx) => (
             <div key={d.day} style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
@@ -1155,9 +1187,132 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
         </div>
         </>
         )}
+        </>
+        )}
       </div>
     </div>
       )}
+    </div>
+  );
+}
+
+function ProgresoView({ alumnoId }) {
+  const [historialRM, setHistorialRM] = useState([]);
+  const [historialSesiones, setHistorialSesiones] = useState([]);
+  const [ejercicioSeleccionado, setEjercicioSeleccionado] = useState("");
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    setCargando(true);
+    Promise.all([api.fetchHistorialRM(alumnoId), api.fetchHistorialSesiones(alumnoId)])
+      .then(([rm, sesiones]) => {
+        setHistorialRM(rm);
+        setHistorialSesiones(sesiones);
+      })
+      .catch(() => {})
+      .finally(() => setCargando(false));
+  }, [alumnoId]);
+
+  const ejerciciosConRM = [];
+  historialRM.forEach((r) => {
+    if (!ejerciciosConRM.find((e) => e.id === r.ejercicio_id)) {
+      ejerciciosConRM.push({ id: r.ejercicio_id, nombre: r.ejercicios?.nombre || "Ejercicio" });
+    }
+  });
+
+  useEffect(() => {
+    if (ejerciciosConRM.length > 0 && !ejercicioSeleccionado) {
+      setEjercicioSeleccionado(ejerciciosConRM[0].id);
+    }
+  }, [historialRM]);
+
+  const formatFecha = (f) => new Date(f).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" });
+
+  const datosRM = historialRM
+    .filter((r) => r.ejercicio_id === ejercicioSeleccionado)
+    .map((r) => ({ fecha: formatFecha(r.fecha), rm: parseFloat(r.rm_estimado) }));
+
+  const datosDuracion = historialSesiones
+    .filter((s) => s.duracion_segundos)
+    .map((s) => ({ fecha: formatFecha(s.fecha), minutos: Math.round(s.duracion_segundos / 60) }));
+
+  const datosBorg = historialSesiones
+    .filter((s) => s.esfuerzo_percibido_borg !== null)
+    .map((s) => ({ fecha: formatFecha(s.fecha), borg: s.esfuerzo_percibido_borg }));
+
+  const tooltipStyle = { background: COLORS.surface2, border: `1px solid ${COLORS.border}`, borderRadius: 6, fontFamily: "Inter", fontSize: 12, color: COLORS.text };
+
+  if (cargando) {
+    return <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Cargando progreso...</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-6" style={{ maxWidth: 640 }}>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+        <div className="flex items-center justify-between mb-3">
+          <span style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 1, color: COLORS.accent }}>RM a lo largo del tiempo</span>
+          {ejerciciosConRM.length > 0 && (
+            <select
+              value={ejercicioSeleccionado}
+              onChange={(ev) => setEjercicioSeleccionado(ev.target.value)}
+              style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "5px 8px", fontFamily: "Inter", fontSize: 12 }}
+            >
+              {ejerciciosConRM.map((e) => (
+                <option key={e.id} value={e.id}>{e.nombre}</option>
+              ))}
+            </select>
+          )}
+        </div>
+        {ejerciciosConRM.length === 0 ? (
+          <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}>Todavía no hay cálculos de RM guardados.</span>
+        ) : datosRM.length < 2 ? (
+          <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}>Necesitás al menos 2 cálculos de este ejercicio en distintas fechas para ver la evolución.</span>
+        ) : (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={datosRM}>
+              <CartesianGrid stroke={COLORS.border} strokeDasharray="3 3" />
+              <XAxis dataKey="fecha" stroke={COLORS.dim} fontSize={11} />
+              <YAxis stroke={COLORS.dim} fontSize={11} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Line type="monotone" dataKey="rm" name="RM (kg)" stroke={COLORS.accent} strokeWidth={2} dot={{ fill: COLORS.accent, r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 1, color: COLORS.accent, marginBottom: 12 }}>Duración de las sesiones</div>
+        {datosDuracion.length < 2 ? (
+          <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}>Todavía no hay suficientes sesiones con cronómetro guardado.</span>
+        ) : (
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={datosDuracion}>
+              <CartesianGrid stroke={COLORS.border} strokeDasharray="3 3" />
+              <XAxis dataKey="fecha" stroke={COLORS.dim} fontSize={11} />
+              <YAxis stroke={COLORS.dim} fontSize={11} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Line type="monotone" dataKey="minutos" name="Minutos" stroke={COLORS.accentDim} strokeWidth={2} dot={{ fill: COLORS.accentDim, r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+        <div style={{ fontFamily: "Bebas Neue", fontSize: 18, letterSpacing: 1, color: COLORS.accent, marginBottom: 12 }}>Esfuerzo percibido (Borg)</div>
+        {datosBorg.length < 2 ? (
+          <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}>Todavía no hay suficientes sesiones con esfuerzo percibido guardado.</span>
+        ) : (
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={datosBorg}>
+              <CartesianGrid stroke={COLORS.border} strokeDasharray="3 3" />
+              <XAxis dataKey="fecha" stroke={COLORS.dim} fontSize={11} />
+              <YAxis domain={[6, 20]} stroke={COLORS.dim} fontSize={11} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Line type="monotone" dataKey="borg" name="Borg" stroke={COLORS.danger} strokeWidth={2} dot={{ fill: COLORS.danger, r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </div>
   );
 }
@@ -1507,10 +1662,23 @@ function AlumnoView({ alumno, setAlumnos }) {
         >
           <Calculator size={14} /> Calcular RM
         </button>
+        <button
+          onClick={() => setSection("progreso")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+          style={{
+            fontFamily: "Inter", fontSize: 13, fontWeight: 600,
+            background: section === "progreso" ? COLORS.accent : "transparent",
+            color: section === "progreso" ? "#101215" : COLORS.dim,
+          }}
+        >
+          <TrendingUp size={14} /> Progreso
+        </button>
       </div>
 
       {section === "rm" ? (
         <RMCalculator alumno={alumno} />
+      ) : section === "progreso" ? (
+        <ProgresoView alumnoId={alumno.id} />
       ) : (
       <>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
