@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp } from "lucide-react";
+import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase, obtenerUsuarioActual, cerrarSesion } from "./lib/supabaseClient";
 import * as api from "./lib/api";
@@ -217,6 +217,471 @@ function CommentsPanel({ exercise, onAddComment, currentAuthor, currentAuthorNam
         <button onClick={submit} style={{ background: COLORS.accent, borderRadius: 6, padding: "6px 10px", display: "flex", alignItems: "center" }}>
           <Send size={14} color="#101215" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+function CalendarGrid({ year, month, markedDates, onSelectDate, selectedDate }) {
+  const primerDia = new Date(year, month, 1);
+  const ultimoDia = new Date(year, month + 1, 0);
+  const diasEnMes = ultimoDia.getDate();
+  const offset = primerDia.getDay();
+  const celdas = [];
+  for (let i = 0; i < offset; i++) celdas.push(null);
+  for (let d = 1; d <= diasEnMes; d++) celdas.push(d);
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const fechaStr = (d) => `${year}-${pad(month + 1)}-${pad(d)}`;
+
+  return (
+    <div>
+      <div className="grid grid-cols-7 gap-1 mb-1">
+        {["D", "L", "M", "M", "J", "V", "S"].map((d, i) => (
+          <div key={i} style={{ fontFamily: "Inter", fontSize: 11, color: COLORS.dim, textAlign: "center" }}>{d}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {celdas.map((d, i) => {
+          if (d === null) return <div key={i} />;
+          const fecha = fechaStr(d);
+          const marcado = markedDates[fecha];
+          const esSeleccionado = fecha === selectedDate;
+          return (
+            <button
+              key={i}
+              onClick={() => onSelectDate(fecha)}
+              className="flex flex-col items-center justify-center rounded-md"
+              style={{
+                aspectRatio: "1",
+                background: esSeleccionado ? COLORS.accent : marcado ? "rgba(91,155,199,0.15)" : COLORS.surface2,
+                border: `1px solid ${esSeleccionado || marcado ? COLORS.accent : COLORS.border}`,
+                color: esSeleccionado ? "#101215" : COLORS.text,
+                fontFamily: "JetBrains Mono",
+                fontSize: 13,
+              }}
+              title={marcado || ""}
+            >
+              {d}
+              {marcado && (
+                <span style={{ width: 4, height: 4, borderRadius: 9999, background: esSeleccionado ? "#101215" : COLORS.accent, marginTop: 2 }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DiaDetalle({ day, alumnoId, fecha, onLocalUpdate, currentAuthor, currentAuthorName }) {
+  const [restTimer, setRestTimer] = useState(null);
+
+  useEffect(() => {
+    if (!restTimer || restTimer.secondsLeft <= 0) return;
+    const t = setTimeout(() => setRestTimer((prev) => (prev ? { ...prev, secondsLeft: prev.secondsLeft - 1 } : prev)), 1000);
+    return () => clearTimeout(t);
+  }, [restTimer]);
+
+  const startRest = (exId, seconds) => setRestTimer({ exId, secondsLeft: seconds, total: seconds });
+
+  const toggleDone = (exId) => {
+    const actual = day.exercises.find((e) => e.id === exId)?.done;
+    onLocalUpdate({ ...day, exercises: day.exercises.map((e) => (e.id === exId ? { ...e, done: !e.done } : e)) });
+    api
+      .marcarEjercicio({ dayId: day.dayId, alumnoId, diaEjercicioId: exId, hecho: !actual, fecha })
+      .catch((err) => alert("No se pudo guardar: " + err.message));
+  };
+
+  const updateLog = (exId, field, value) => {
+    onLocalUpdate({ ...day, exercises: day.exercises.map((e) => (e.id === exId ? { ...e, [field]: value } : e)) });
+  };
+
+  const guardarLogEnBlur = (exId) => {
+    const ex = day.exercises.find((e) => e.id === exId);
+    if (!ex) return;
+    api
+      .guardarLog({ dayId: day.dayId, alumnoId, diaEjercicioId: exId, pesoLogrado: ex.logWeight, repsLogradas: ex.logReps, fecha })
+      .catch((err) => alert("No se pudo guardar el registro: " + err.message));
+  };
+
+  const toggleComments = (exId) => {
+    onLocalUpdate({ ...day, exercises: day.exercises.map((e) => (e.id === exId ? { ...e, showComments: !e.showComments } : e)) });
+  };
+
+  const addComment = async (exId, comment) => {
+    try {
+      const guardado = await api.agregarComentario({ diaEjercicioId: exId, autorId: currentAuthor === "profesor" ? comment.autorId : alumnoId, texto: comment.text });
+      const comentarioReal = { id: guardado.id, author: currentAuthor, authorName: currentAuthorName, text: comment.text };
+      onLocalUpdate({ ...day, exercises: day.exercises.map((e) => (e.id === exId ? { ...e, comments: [...e.comments, comentarioReal] } : e)) });
+    } catch (err) {
+      alert("No se pudo guardar el comentario: " + err.message);
+    }
+  };
+
+  const setBorg = (value) => {
+    onLocalUpdate({ ...day, rpeBorg: value });
+    api.guardarBorg({ dayId: day.dayId, alumnoId, valor: value, fecha }).catch((err) => alert("No se pudo guardar el esfuerzo: " + err.message));
+  };
+
+  const pct = Math.round((day.exercises.filter((e) => e.done).length / (day.exercises.length || 1)) * 100) || 0;
+
+  return (
+    <div>
+      <div className="flex items-baseline gap-2 mb-1">
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 24, letterSpacing: 1, color: COLORS.accent }}>{day.day}</span>
+        <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>{day.focus}</span>
+      </div>
+      <div style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim, marginBottom: 14, textTransform: "capitalize" }}>
+        {new Date(fecha + "T00:00:00").toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <BarbellProgress pct={pct} />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {day.exercises.map((e) => (
+          <div
+            key={e.id}
+            style={{
+              background: COLORS.surface,
+              border: `1px solid ${e.done ? COLORS.accentDim : COLORS.border}`,
+              borderRadius: 10,
+              padding: 14,
+              opacity: e.done ? 0.75 : 1,
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div style={{ fontFamily: "Inter", fontSize: 15, fontWeight: 600, color: COLORS.text }}>{e.name}</div>
+                <div style={{ fontFamily: "JetBrains Mono", fontSize: 12, color: COLORS.dim, marginTop: 2 }}>
+                  Objetivo: {e.sets}×{e.reps} · {e.targetWeight}
+                </div>
+              </div>
+              <button
+                onClick={() => toggleDone(e.id)}
+                style={{
+                  width: 32, height: 32, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: e.done ? COLORS.accent : "transparent",
+                  border: `1px solid ${e.done ? COLORS.accent : COLORS.border}`,
+                  color: e.done ? "#101215" : COLORS.dim,
+                }}
+              >
+                <Check size={16} />
+              </button>
+            </div>
+
+            <div className="mt-2">
+              <MediaBox url={e.mediaUrl} />
+            </div>
+
+            <div className="flex gap-2 mt-3 flex-wrap items-center">
+              <input
+                placeholder="kg"
+                value={e.logWeight}
+                onChange={(ev) => updateLog(e.id, "logWeight", ev.target.value)}
+                onBlur={() => guardarLogEnBlur(e.id)}
+                style={{ width: 70, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "JetBrains Mono", fontSize: 13 }}
+              />
+              <input
+                placeholder="reps"
+                value={e.logReps}
+                onChange={(ev) => updateLog(e.id, "logReps", ev.target.value)}
+                onBlur={() => guardarLogEnBlur(e.id)}
+                style={{ width: 70, background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "JetBrains Mono", fontSize: 13 }}
+              />
+              <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}>registrado</span>
+
+              <div className="flex items-center gap-1 ml-auto">
+                {restTimer && restTimer.exId === e.id ? (
+                  <span
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-md"
+                    style={{ background: "rgba(91,155,199,0.12)", border: `1px solid ${COLORS.accent}`, fontFamily: "JetBrains Mono", fontSize: 13, color: COLORS.accent }}
+                  >
+                    <Clock size={13} /> {formatTime(restTimer.secondsLeft)}
+                  </span>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => startRest(e.id, e.restSets)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md"
+                      style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}
+                    >
+                      <Clock size={12} /> Descanso {e.restSets}s
+                    </button>
+                    <button
+                      onClick={() => startRest(e.id, e.restAfter)}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-md"
+                      style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}
+                    >
+                      <Clock size={12} /> Post {e.restAfter}s
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={() => toggleComments(e.id)}
+              className="flex items-center gap-1.5 mt-3"
+              style={{ color: e.comments.length ? COLORS.accent : COLORS.dim, fontFamily: "Inter", fontSize: 12 }}
+            >
+              <MessageSquare size={13} />
+              {e.comments.length > 0 ? `${e.comments.length} comentario${e.comments.length > 1 ? "s" : ""}` : "Dejar feedback"}
+            </button>
+
+            {e.showComments && (
+              <CommentsPanel exercise={e} onAddComment={addComment} currentAuthor={currentAuthor} currentAuthorName={currentAuthorName} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-5">
+        <BorgScale value={day.rpeBorg} onChange={setBorg} />
+      </div>
+    </div>
+  );
+}
+
+function CalendarioAlumno({ alumno }) {
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
+  const [programacion, setProgramacion] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [diaDetalle, setDiaDetalle] = useState(null);
+  const [cargando, setCargando] = useState(false);
+
+  const cargarMes = () => {
+    const desde = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const ultimoDia = new Date(year, month + 1, 0).getDate();
+    const hasta = `${year}-${String(month + 1).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`;
+    api.fetchProgramacionRango({ alumnoId: alumno.id, desde, hasta }).then(setProgramacion).catch(() => {});
+  };
+
+  useEffect(() => {
+    cargarMes();
+  }, [year, month, alumno.id]);
+
+  const markedDates = {};
+  programacion.forEach((p) => { markedDates[p.fecha] = p.dias?.nombre || "Rutina"; });
+
+  const seleccionar = async (fecha) => {
+    setSelectedDate(fecha);
+    const prog = programacion.find((p) => p.fecha === fecha);
+    if (!prog) { setDiaDetalle(null); return; }
+    setCargando(true);
+    try {
+      const detalle = await api.fetchDiaEnFecha({ dayId: prog.dia_id, alumnoId: alumno.id, fecha });
+      setDiaDetalle(detalle);
+    } catch (err) {
+      alert("No se pudo cargar la rutina de ese día: " + err.message);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const cambiarMes = (delta) => {
+    let m = month + delta;
+    let y = year;
+    if (m < 0) { m = 11; y--; }
+    if (m > 11) { m = 0; y++; }
+    setMonth(m);
+    setYear(y);
+    setSelectedDate(null);
+    setDiaDetalle(null);
+  };
+
+  const nombreMes = new Date(year, month, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+
+  return (
+    <div className="flex flex-col md:flex-row gap-6" style={{ maxWidth: 720 }}>
+      <div style={{ minWidth: 260 }}>
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={() => cambiarMes(-1)} style={{ color: COLORS.dim }}><ChevronLeft size={16} /></button>
+          <span style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 600, color: COLORS.text, textTransform: "capitalize" }}>{nombreMes}</span>
+          <button onClick={() => cambiarMes(1)} style={{ color: COLORS.dim }}><ChevronRight size={16} /></button>
+        </div>
+        <CalendarGrid year={year} month={month} markedDates={markedDates} onSelectDate={seleccionar} selectedDate={selectedDate} />
+      </div>
+
+      <div className="flex-1">
+        {!selectedDate ? (
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>
+            Elegí un día del calendario para ver qué rutina tenías programada.
+          </span>
+        ) : cargando ? (
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Cargando...</span>
+        ) : !diaDetalle ? (
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>No tenías nada programado para ese día.</span>
+        ) : (
+          <DiaDetalle day={diaDetalle} alumnoId={alumno.id} fecha={selectedDate} onLocalUpdate={setDiaDetalle} currentAuthor="alumno" currentAuthorName={alumno.name.split(" ")[0]} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CalendarioProfesor({ alumno }) {
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
+  const [programacion, setProgramacion] = useState([]);
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [diaDetalle, setDiaDetalle] = useState(null);
+  const [cargando, setCargando] = useState(false);
+  const [form, setForm] = useState({ dayIdx: 0, fecha: "", repetirHasta: "" });
+  const [programando, setProgramando] = useState(false);
+
+  const cargarMes = () => {
+    const desde = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const ultimoDia = new Date(year, month + 1, 0).getDate();
+    const hasta = `${year}-${String(month + 1).padStart(2, "0")}-${String(ultimoDia).padStart(2, "0")}`;
+    api.fetchProgramacionRango({ alumnoId: alumno.id, desde, hasta }).then(setProgramacion).catch(() => {});
+  };
+
+  useEffect(() => {
+    cargarMes();
+  }, [year, month, alumno.id]);
+
+  const markedDates = {};
+  programacion.forEach((p) => { markedDates[p.fecha] = p.dias?.nombre || "Rutina"; });
+
+  const seleccionar = async (fecha) => {
+    setSelectedDate(fecha);
+    const prog = programacion.find((p) => p.fecha === fecha);
+    if (!prog) { setDiaDetalle(null); return; }
+    setCargando(true);
+    try {
+      const detalle = await api.fetchDiaEnFecha({ dayId: prog.dia_id, alumnoId: alumno.id, fecha });
+      setDiaDetalle(detalle);
+    } catch (err) {
+      alert("No se pudo cargar: " + err.message);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  const cambiarMes = (delta) => {
+    let m = month + delta;
+    let y = year;
+    if (m < 0) { m = 11; y--; }
+    if (m > 11) { m = 0; y++; }
+    setMonth(m);
+    setYear(y);
+    setSelectedDate(null);
+    setDiaDetalle(null);
+  };
+
+  const nombreMes = new Date(year, month, 1).toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+
+  const programar = async () => {
+    if (!form.fecha || alumno.days.length === 0) return;
+    setProgramando(true);
+    try {
+      await api.programarDia({
+        diaId: alumno.days[form.dayIdx].dayId,
+        alumnoId: alumno.id,
+        fecha: form.fecha,
+        repetirHasta: form.repetirHasta || null,
+      });
+      cargarMes();
+      setForm({ ...form, fecha: "", repetirHasta: "" });
+    } catch (err) {
+      alert("No se pudo programar: " + err.message);
+    } finally {
+      setProgramando(false);
+    }
+  };
+
+  const borrarProgramacionActual = async () => {
+    const prog = programacion.find((p) => p.fecha === selectedDate);
+    if (!prog) return;
+    const borrarSerie =
+      prog.serie_id &&
+      confirm("Esta rutina se repite semanalmente. Aceptar = borrar todas las repeticiones futuras. Cancelar = borrar solo este día.");
+    try {
+      if (borrarSerie) {
+        await api.eliminarSerieProgramacion(prog.serie_id);
+      } else {
+        await api.eliminarProgramacion(prog.id);
+      }
+      setDiaDetalle(null);
+      setSelectedDate(null);
+      cargarMes();
+    } catch (err) {
+      alert("No se pudo borrar: " + err.message);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-6" style={{ maxWidth: 760 }}>
+      <div style={{ background: COLORS.surface, border: `1px dashed ${COLORS.border}`, borderRadius: 10, padding: 16 }}>
+        <div style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim, marginBottom: 10 }}>Programar un día en el calendario</div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <select
+            value={form.dayIdx}
+            onChange={(ev) => setForm({ ...form, dayIdx: Number(ev.target.value) })}
+            style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+          >
+            {alumno.days.map((d, idx) => (
+              <option key={d.dayId} value={idx}>{d.day} — {d.focus}</option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={form.fecha}
+            onChange={(ev) => setForm({ ...form, fecha: ev.target.value })}
+            style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+          />
+          <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim }}>repetir cada semana hasta (opcional)</span>
+          <input
+            type="date"
+            value={form.repetirHasta}
+            onChange={(ev) => setForm({ ...form, repetirHasta: ev.target.value })}
+            style={{ background: COLORS.surface2, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "6px 8px", fontFamily: "Inter", fontSize: 13 }}
+          />
+          <button
+            onClick={programar}
+            disabled={programando || !form.fecha}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-md"
+            style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600, opacity: programando || !form.fecha ? 0.6 : 1 }}
+          >
+            <Plus size={14} /> {programando ? "Programando..." : "Programar"}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-6">
+        <div style={{ minWidth: 260 }}>
+          <div className="flex items-center justify-between mb-3">
+            <button onClick={() => cambiarMes(-1)} style={{ color: COLORS.dim }}><ChevronLeft size={16} /></button>
+            <span style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 600, color: COLORS.text, textTransform: "capitalize" }}>{nombreMes}</span>
+            <button onClick={() => cambiarMes(1)} style={{ color: COLORS.dim }}><ChevronRight size={16} /></button>
+          </div>
+          <CalendarGrid year={year} month={month} markedDates={markedDates} onSelectDate={seleccionar} selectedDate={selectedDate} />
+        </div>
+
+        <div className="flex-1">
+          {!selectedDate ? (
+            <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Elegí un día del calendario para ver o editar lo programado.</span>
+          ) : cargando ? (
+            <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Cargando...</span>
+          ) : !diaDetalle ? (
+            <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Nada programado para ese día.</span>
+          ) : (
+            <>
+              <div className="flex justify-end mb-2">
+                <button onClick={borrarProgramacionActual} className="flex items-center gap-1 text-xs" style={{ color: COLORS.danger, fontFamily: "Inter" }}>
+                  <Trash2 size={13} /> Quitar del calendario
+                </button>
+              </div>
+              <DiaDetalle day={diaDetalle} alumnoId={alumno.id} fecha={selectedDate} onLocalUpdate={setDiaDetalle} currentAuthor="profesor" currentAuthorName="Vos" />
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1034,10 +1499,23 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
             >
               <TrendingUp size={12} /> Progreso
             </button>
+            <button
+              onClick={() => setVistaAlumno("calendario")}
+              className="px-3 py-1 rounded-full flex items-center gap-1"
+              style={{
+                fontFamily: "Inter", fontSize: 12, fontWeight: 600,
+                background: vistaAlumno === "calendario" ? COLORS.accent : "transparent",
+                color: vistaAlumno === "calendario" ? "#101215" : COLORS.dim,
+              }}
+            >
+              <CalendarDays size={12} /> Calendario
+            </button>
           </div>
         </div>
         {vistaAlumno === "progreso" ? (
           <ProgresoView alumnoId={selected.id} />
+        ) : vistaAlumno === "calendario" ? (
+          <CalendarioProfesor alumno={selected} />
         ) : (
         <>
         <div className="mt-4 flex flex-col gap-5">
@@ -1516,10 +1994,26 @@ function AlumnoView({ alumno, setAlumnos }) {
   const [dayIdx, setDayIdx] = useState(0);
   const [restTimer, setRestTimer] = useState(null);
   const [sessionTimer, setSessionTimer] = useState({ running: false, elapsed: 0 });
+  const [programadoHoy, setProgramadoHoy] = useState(undefined); // undefined = todavía no se sabe
 
   const sinDias = !alumno.days || alumno.days.length === 0;
   const day = sinDias ? { exercises: [], dayId: null, rpeBorg: null } : alumno.days[dayIdx];
   const pct = Math.round((day.exercises.filter((e) => e.done).length / (day.exercises.length || 1)) * 100) || 0;
+
+  useEffect(() => {
+    if (sinDias) return;
+    const hoy = new Date().toISOString().slice(0, 10);
+    api
+      .fetchProgramacionParaFecha({ alumnoId: alumno.id, fecha: hoy })
+      .then((prog) => {
+        setProgramadoHoy(prog || null);
+        if (prog) {
+          const idx = alumno.days.findIndex((d) => d.dayId === prog.dia_id);
+          if (idx !== -1) setDayIdx(idx);
+        }
+      })
+      .catch(() => setProgramadoHoy(null));
+  }, [alumno.id]);
 
   useEffect(() => {
     if (!restTimer || restTimer.secondsLeft <= 0) return;
@@ -1673,12 +2167,25 @@ function AlumnoView({ alumno, setAlumnos }) {
         >
           <TrendingUp size={14} /> Progreso
         </button>
+        <button
+          onClick={() => setSection("calendario")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+          style={{
+            fontFamily: "Inter", fontSize: 13, fontWeight: 600,
+            background: section === "calendario" ? COLORS.accent : "transparent",
+            color: section === "calendario" ? "#101215" : COLORS.dim,
+          }}
+        >
+          <CalendarDays size={14} /> Calendario
+        </button>
       </div>
 
       {section === "rm" ? (
         <RMCalculator alumno={alumno} />
       ) : section === "progreso" ? (
         <ProgresoView alumnoId={alumno.id} />
+      ) : section === "calendario" ? (
+        <CalendarioAlumno alumno={alumno} />
       ) : (
       <>
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
@@ -1708,6 +2215,21 @@ function AlumnoView({ alumno, setAlumnos }) {
           onReset={() => setSessionTimer({ running: false, elapsed: 0 })}
         />
       </div>
+
+      {programadoHoy === null && (
+        <div className="flex items-center justify-between gap-3 mb-4 px-3 py-2 rounded-md" style={{ background: "rgba(226,74,59,0.1)", border: `1px solid ${COLORS.danger}` }}>
+          <span style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.text }}>
+            No tenés nada programado para hoy. Si te faltó algún día, buscalo en el calendario.
+          </span>
+          <button
+            onClick={() => setSection("calendario")}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-md shrink-0"
+            style={{ background: COLORS.danger, color: "#101215", fontFamily: "Inter", fontSize: 12, fontWeight: 600 }}
+          >
+            <CalendarDays size={12} /> Ver calendario
+          </button>
+        </div>
+      )}
 
       <div style={{ fontFamily: "Bebas Neue", fontSize: 34, letterSpacing: 1, color: COLORS.text, lineHeight: 1 }}>{day.focus}</div>
       <div style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim, marginTop: 4, marginBottom: 16 }}>

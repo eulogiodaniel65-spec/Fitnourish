@@ -136,8 +136,7 @@ export async function fetchAlumnosConRutinas() {
 // ESCRITURA
 // ============================================================
 
-async function getOrCrearSesionHoy(dayId, alumnoId) {
-  const fecha = hoy();
+async function getOrCrearSesionParaFecha(dayId, alumnoId, fecha) {
   const { data, error } = await supabase
     .from("sesiones")
     .upsert({ dia_id: dayId, alumno_id: alumnoId, fecha }, { onConflict: "dia_id,alumno_id,fecha" })
@@ -147,8 +146,8 @@ async function getOrCrearSesionHoy(dayId, alumnoId) {
   return data;
 }
 
-export async function marcarEjercicio({ dayId, alumnoId, diaEjercicioId, hecho }) {
-  const sesion = await getOrCrearSesionHoy(dayId, alumnoId);
+export async function marcarEjercicio({ dayId, alumnoId, diaEjercicioId, hecho, fecha }) {
+  const sesion = await getOrCrearSesionParaFecha(dayId, alumnoId, fecha || hoy());
   if (hecho) {
     const { error } = await supabase
       .from("registros")
@@ -164,8 +163,8 @@ export async function marcarEjercicio({ dayId, alumnoId, diaEjercicioId, hecho }
   }
 }
 
-export async function guardarLog({ dayId, alumnoId, diaEjercicioId, pesoLogrado, repsLogradas }) {
-  const sesion = await getOrCrearSesionHoy(dayId, alumnoId);
+export async function guardarLog({ dayId, alumnoId, diaEjercicioId, pesoLogrado, repsLogradas, fecha }) {
+  const sesion = await getOrCrearSesionParaFecha(dayId, alumnoId, fecha || hoy());
   const { error } = await supabase
     .from("registros")
     .upsert(
@@ -175,14 +174,14 @@ export async function guardarLog({ dayId, alumnoId, diaEjercicioId, pesoLogrado,
   if (error) throw error;
 }
 
-export async function guardarBorg({ dayId, alumnoId, valor }) {
-  const sesion = await getOrCrearSesionHoy(dayId, alumnoId);
+export async function guardarBorg({ dayId, alumnoId, valor, fecha }) {
+  const sesion = await getOrCrearSesionParaFecha(dayId, alumnoId, fecha || hoy());
   const { error } = await supabase.from("sesiones").update({ esfuerzo_percibido_borg: valor }).eq("id", sesion.id);
   if (error) throw error;
 }
 
-export async function guardarDuracionSesion({ dayId, alumnoId, segundos }) {
-  const sesion = await getOrCrearSesionHoy(dayId, alumnoId);
+export async function guardarDuracionSesion({ dayId, alumnoId, segundos, fecha }) {
+  const sesion = await getOrCrearSesionParaFecha(dayId, alumnoId, fecha || hoy());
   const { error } = await supabase.from("sesiones").update({ duracion_segundos: segundos }).eq("id", sesion.id);
   if (error) throw error;
 }
@@ -497,4 +496,137 @@ export async function fetchHistorialSesiones(alumnoId) {
     .order("fecha", { ascending: true });
   if (error) throw error;
   return data || [];
+}
+
+// ------------------------------------------------------------
+// Calendario: programar un día de rutina para fechas concretas.
+// ------------------------------------------------------------
+
+function sumarDias(fechaStr, n) {
+  const d = new Date(fechaStr + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function programarDia({ diaId, alumnoId, fecha, repetirHasta }) {
+  const fechas = [fecha];
+  if (repetirHasta) {
+    let siguiente = sumarDias(fecha, 7);
+    while (siguiente <= repetirHasta) {
+      fechas.push(siguiente);
+      siguiente = sumarDias(siguiente, 7);
+    }
+  }
+  const serieId = fechas.length > 1 ? crypto.randomUUID() : null;
+  const filas = fechas.map((f) => ({ dia_id: diaId, alumno_id: alumnoId, fecha: f, serie_id: serieId }));
+  const { data, error } = await supabase
+    .from("programacion")
+    .upsert(filas, { onConflict: "alumno_id,fecha" })
+    .select();
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchProgramacionRango({ alumnoId, desde, hasta }) {
+  const { data, error } = await supabase
+    .from("programacion")
+    .select("id, fecha, dia_id, serie_id, dias ( nombre, foco )")
+    .eq("alumno_id", alumnoId)
+    .gte("fecha", desde)
+    .lte("fecha", hasta)
+    .order("fecha");
+  if (error) throw error;
+  return data || [];
+}
+
+export async function fetchProgramacionParaFecha({ alumnoId, fecha }) {
+  const { data, error } = await supabase
+    .from("programacion")
+    .select("id, dia_id, fecha, dias ( nombre, foco )")
+    .eq("alumno_id", alumnoId)
+    .eq("fecha", fecha)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function eliminarProgramacion(id) {
+  const { error } = await supabase.from("programacion").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function eliminarSerieProgramacion(serieId) {
+  const { error } = await supabase.from("programacion").delete().eq("serie_id", serieId);
+  if (error) throw error;
+}
+
+export async function fetchDiaEnFecha({ dayId, alumnoId, fecha }) {
+  const { data: dRow, error: eD } = await supabase.from("dias").select("id, nombre, foco").eq("id", dayId).single();
+  if (eD) throw eD;
+
+  const { data: des, error: eDE } = await supabase
+    .from("dia_ejercicios")
+    .select("id, series, reps, peso_objetivo, descanso_series_seg, descanso_posterior_seg, orden, ejercicios ( id, nombre, url_media )")
+    .eq("dia_id", dayId)
+    .order("orden");
+  if (eDE) throw eDE;
+
+  const { data: sesion, error: eS } = await supabase
+    .from("sesiones")
+    .select("id, duracion_segundos, esfuerzo_percibido_borg")
+    .eq("dia_id", dayId)
+    .eq("alumno_id", alumnoId)
+    .eq("fecha", fecha)
+    .maybeSingle();
+  if (eS) throw eS;
+
+  let registros = [];
+  if (sesion) {
+    const { data: regs, error: eR2 } = await supabase.from("registros").select("*").eq("sesion_id", sesion.id);
+    if (eR2) throw eR2;
+    registros = regs || [];
+  }
+
+  const deIds = (des || []).map((x) => x.id);
+  let comentarios = [];
+  if (deIds.length) {
+    const { data: coms, error: eC } = await supabase
+      .from("comentarios")
+      .select("id, dia_ejercicio_id, autor_id, texto, usuarios ( nombre, rol )")
+      .in("dia_ejercicio_id", deIds)
+      .order("fecha");
+    if (eC) throw eC;
+    comentarios = coms || [];
+  }
+
+  const exercises = (des || []).map((de) => {
+    const reg = registros.find((r) => r.dia_ejercicio_id === de.id);
+    const coms = comentarios
+      .filter((c) => c.dia_ejercicio_id === de.id)
+      .map((c) => ({ id: c.id, author: c.usuarios?.rol, authorName: c.usuarios?.nombre, text: c.texto }));
+    return {
+      id: de.id,
+      catalogId: de.ejercicios?.id,
+      name: de.ejercicios?.nombre || "Ejercicio",
+      sets: de.series,
+      reps: de.reps,
+      targetWeight: de.peso_objetivo || "-",
+      restSets: de.descanso_series_seg,
+      restAfter: de.descanso_posterior_seg,
+      mediaUrl: de.ejercicios?.url_media || null,
+      done: !!reg,
+      logWeight: reg?.peso_logrado || "",
+      logReps: reg?.reps_logradas || "",
+      showComments: false,
+      comments: coms,
+    };
+  });
+
+  return {
+    dayId: dRow.id,
+    day: dRow.nombre,
+    focus: dRow.foco || "",
+    rpeBorg: sesion?.esfuerzo_percibido_borg ?? null,
+    exercises,
+  };
 }
