@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
-import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays, Home } from "lucide-react";
+import React, { useState, useEffect, useRef, useContext, createContext } from "react";
+import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays, Home, X, CheckCircle2, AlertCircle } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase, obtenerUsuarioActual, cerrarSesion } from "./lib/supabaseClient";
 import * as api from "./lib/api";
@@ -104,6 +104,123 @@ const BORG_LEVELS = [
   { min: 17, max: 18, label: "Muy intenso" },
   { min: 19, max: 20, label: "Esfuerzo máximo" },
 ];
+
+// ============================================================
+// Sistema de notificaciones propio (reemplaza alert/confirm del navegador)
+// ============================================================
+
+const NotificationContext = createContext(null);
+
+function useNotify() {
+  const ctx = useContext(NotificationContext);
+  if (!ctx) throw new Error("useNotify debe usarse dentro de <NotificationProvider>");
+  return ctx;
+}
+
+function Toast({ toast, onClose }) {
+  const esError = toast.tipo === "error";
+  useEffect(() => {
+    const t = setTimeout(() => onClose(toast.id), 4500);
+    return () => clearTimeout(t);
+  }, [toast.id]);
+
+  return (
+    <div
+      className="flex items-start gap-2.5 px-4 py-3 rounded-lg"
+      style={{
+        background: COLORS.surface,
+        border: `1px solid ${esError ? COLORS.danger : COLORS.accent}`,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+        minWidth: 260,
+        maxWidth: 360,
+      }}
+    >
+      {esError ? <AlertCircle size={18} color={COLORS.danger} style={{ flexShrink: 0, marginTop: 1 }} /> : <CheckCircle2 size={18} color={COLORS.accent} style={{ flexShrink: 0, marginTop: 1 }} />}
+      <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.text, flex: 1, lineHeight: 1.4 }}>{toast.mensaje}</span>
+      <button onClick={() => onClose(toast.id)} style={{ color: COLORS.dim, flexShrink: 0 }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
+
+function ConfirmModal({ confirmState, onResolve }) {
+  if (!confirmState) return null;
+  return (
+    <div
+      className="flex items-center justify-center"
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, padding: 20 }}
+      onClick={() => onResolve(false)}
+    >
+      <div
+        onClick={(ev) => ev.stopPropagation()}
+        style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 22, maxWidth: 380, width: "100%", boxShadow: "0 12px 32px rgba(0,0,0,0.5)" }}
+      >
+        <div style={{ fontFamily: "Inter", fontSize: 14, color: COLORS.text, lineHeight: 1.5, marginBottom: 20 }}>{confirmState.mensaje}</div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={() => onResolve(false)}
+            className="px-3.5 py-2 rounded-md"
+            style={{ background: COLORS.surface2, color: COLORS.dim, fontFamily: "Inter", fontSize: 13, fontWeight: 600 }}
+          >
+            {confirmState.cancelText}
+          </button>
+          <button
+            onClick={() => onResolve(true)}
+            className="px-3.5 py-2 rounded-md"
+            style={{ background: COLORS.danger, color: "#fff", fontFamily: "Inter", fontSize: 13, fontWeight: 600 }}
+          >
+            {confirmState.confirmText}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NotificationProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const [confirmState, setConfirmState] = useState(null);
+  const resolverRef = useRef(null);
+
+  const toast = (mensaje, tipo = "error") => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, mensaje, tipo }]);
+  };
+
+  const cerrarToast = (id) => setToasts((prev) => prev.filter((t) => t.id !== id));
+
+  const confirmar = (mensaje, opciones = {}) => {
+    return new Promise((resolve) => {
+      resolverRef.current = resolve;
+      setConfirmState({
+        mensaje,
+        confirmText: opciones.confirmText || "Aceptar",
+        cancelText: opciones.cancelText || "Cancelar",
+      });
+    });
+  };
+
+  const resolverConfirm = (valor) => {
+    setConfirmState(null);
+    if (resolverRef.current) {
+      resolverRef.current(valor);
+      resolverRef.current = null;
+    }
+  };
+
+  return (
+    <NotificationContext.Provider value={{ toast, confirmar }}>
+      {children}
+      <div style={{ position: "fixed", bottom: 20, right: 20, zIndex: 1000, display: "flex", flexDirection: "column", gap: 8 }}>
+        {toasts.map((t) => (
+          <Toast key={t.id} toast={t} onClose={cerrarToast} />
+        ))}
+      </div>
+      <ConfirmModal confirmState={confirmState} onResolve={resolverConfirm} />
+    </NotificationContext.Provider>
+  );
+}
 
 function borgLabel(v) {
   const found = BORG_LEVELS.find((l) => v >= l.min && v <= l.max);
@@ -276,6 +393,7 @@ function CalendarGrid({ year, month, markedDates, onSelectDate, selectedDate }) 
 }
 
 function DiaDetalle({ day, alumnoId, fecha, onLocalUpdate, currentAuthor, currentAuthorName }) {
+  const { toast, confirmar } = useNotify();
   const [restTimer, setRestTimer] = useState(null);
 
   useEffect(() => {
@@ -291,7 +409,7 @@ function DiaDetalle({ day, alumnoId, fecha, onLocalUpdate, currentAuthor, curren
     onLocalUpdate({ ...day, exercises: day.exercises.map((e) => (e.id === exId ? { ...e, done: !e.done } : e)) });
     api
       .marcarEjercicio({ dayId: day.dayId, alumnoId, diaEjercicioId: exId, hecho: !actual, fecha })
-      .catch((err) => alert("No se pudo guardar: " + err.message));
+      .catch((err) => toast("No se pudo guardar: " + err.message));
   };
 
   const updateLog = (exId, field, value) => {
@@ -303,7 +421,7 @@ function DiaDetalle({ day, alumnoId, fecha, onLocalUpdate, currentAuthor, curren
     if (!ex) return;
     api
       .guardarLog({ dayId: day.dayId, alumnoId, diaEjercicioId: exId, pesoLogrado: ex.logWeight, repsLogradas: ex.logReps, fecha })
-      .catch((err) => alert("No se pudo guardar el registro: " + err.message));
+      .catch((err) => toast("No se pudo guardar el registro: " + err.message));
   };
 
   const toggleComments = (exId) => {
@@ -316,13 +434,13 @@ function DiaDetalle({ day, alumnoId, fecha, onLocalUpdate, currentAuthor, curren
       const comentarioReal = { id: guardado.id, author: currentAuthor, authorName: currentAuthorName, text: comment.text };
       onLocalUpdate({ ...day, exercises: day.exercises.map((e) => (e.id === exId ? { ...e, comments: [...e.comments, comentarioReal] } : e)) });
     } catch (err) {
-      alert("No se pudo guardar el comentario: " + err.message);
+      toast("No se pudo guardar el comentario: " + err.message);
     }
   };
 
   const setBorg = (value) => {
     onLocalUpdate({ ...day, rpeBorg: value });
-    api.guardarBorg({ dayId: day.dayId, alumnoId, valor: value, fecha }).catch((err) => alert("No se pudo guardar el esfuerzo: " + err.message));
+    api.guardarBorg({ dayId: day.dayId, alumnoId, valor: value, fecha }).catch((err) => toast("No se pudo guardar el esfuerzo: " + err.message));
   };
 
   const pct = Math.round((day.exercises.filter((e) => e.done).length / (day.exercises.length || 1)) * 100) || 0;
@@ -447,6 +565,7 @@ function DiaDetalle({ day, alumnoId, fecha, onLocalUpdate, currentAuthor, curren
 }
 
 function CalendarioAlumno({ alumno }) {
+  const { toast, confirmar } = useNotify();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -478,7 +597,7 @@ function CalendarioAlumno({ alumno }) {
       const detalle = await api.fetchDiaEnFecha({ dayId: prog.dia_id, alumnoId: alumno.id, fecha });
       setDiaDetalle(detalle);
     } catch (err) {
-      alert("No se pudo cargar la rutina de ese día: " + err.message);
+      toast("No se pudo cargar la rutina de ese día: " + err.message);
     } finally {
       setCargando(false);
     }
@@ -526,6 +645,7 @@ function CalendarioAlumno({ alumno }) {
 }
 
 function CalendarioProfesor({ alumno }) {
+  const { toast, confirmar } = useNotify();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -559,7 +679,7 @@ function CalendarioProfesor({ alumno }) {
       const detalle = await api.fetchDiaEnFecha({ dayId: prog.dia_id, alumnoId: alumno.id, fecha });
       setDiaDetalle(detalle);
     } catch (err) {
-      alert("No se pudo cargar: " + err.message);
+      toast("No se pudo cargar: " + err.message);
     } finally {
       setCargando(false);
     }
@@ -591,7 +711,7 @@ function CalendarioProfesor({ alumno }) {
       cargarMes();
       setForm({ ...form, fecha: "", repetirHasta: "" });
     } catch (err) {
-      alert("No se pudo programar: " + err.message);
+      toast("No se pudo programar: " + err.message);
     } finally {
       setProgramando(false);
     }
@@ -600,9 +720,13 @@ function CalendarioProfesor({ alumno }) {
   const borrarProgramacionActual = async () => {
     const prog = programacion.find((p) => p.fecha === selectedDate);
     if (!prog) return;
-    const borrarSerie =
-      prog.serie_id &&
-      confirm("Esta rutina se repite semanalmente. Aceptar = borrar todas las repeticiones futuras. Cancelar = borrar solo este día.");
+    let borrarSerie = false;
+    if (prog.serie_id) {
+      borrarSerie = await confirmar("Esta rutina se repite semanalmente. ¿Qué querés borrar?", {
+        confirmText: "Todas las repeticiones",
+        cancelText: "Solo este día",
+      });
+    }
     try {
       if (borrarSerie) {
         await api.eliminarSerieProgramacion(prog.serie_id);
@@ -613,7 +737,7 @@ function CalendarioProfesor({ alumno }) {
       setSelectedDate(null);
       cargarMes();
     } catch (err) {
-      alert("No se pudo borrar: " + err.message);
+      toast("No se pudo borrar: " + err.message);
     }
   };
 
@@ -689,6 +813,7 @@ function CalendarioProfesor({ alumno }) {
 }
 
 function CatalogoManager({ catalogo, setCatalogo }) {
+  const { toast, confirmar } = useNotify();
   const [newEjercicio, setNewEjercicio] = useState({ nombre: "", grupoMuscular: "" });
   const [creando, setCreando] = useState(false);
   const [subiendoId, setSubiendoId] = useState(null);
@@ -701,7 +826,7 @@ function CatalogoManager({ catalogo, setCatalogo }) {
       setCatalogo((prev) => [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)));
       setNewEjercicio({ nombre: "", grupoMuscular: "" });
     } catch (err) {
-      alert("No se pudo crear el ejercicio: " + err.message);
+      toast("No se pudo crear el ejercicio: " + err.message);
     } finally {
       setCreando(false);
     }
@@ -714,7 +839,7 @@ function CatalogoManager({ catalogo, setCatalogo }) {
       const actualizado = await api.subirMediaEjercicio({ ejercicioId, file });
       setCatalogo((prev) => prev.map((e) => (e.id === ejercicioId ? { ...e, url_media: actualizado.url_media } : e)));
     } catch (err) {
-      alert("No se pudo subir el archivo: " + err.message);
+      toast("No se pudo subir el archivo: " + err.message);
     } finally {
       setSubiendoId(null);
     }
@@ -785,6 +910,7 @@ function CatalogoManager({ catalogo, setCatalogo }) {
 }
 
 function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
+  const { toast, confirmar } = useNotify();
   const [plantillas, setPlantillas] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [nuevaPlantilla, setNuevaPlantilla] = useState("");
@@ -826,7 +952,7 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
       setSelectedId(nueva.id);
       setNuevaPlantilla("");
     } catch (err) {
-      alert("No se pudo crear la plantilla: " + err.message);
+      toast("No se pudo crear la plantilla: " + err.message);
     } finally {
       setCreandoPlantilla(false);
     }
@@ -840,7 +966,7 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
       setDiasPlantilla((prev) => [...prev, { dayId: dia.id, day: dia.nombre, focus: dia.foco || "", exercises: [] }]);
       setNewDay({ nombre: "", foco: "" });
     } catch (err) {
-      alert("No se pudo crear el día: " + err.message);
+      toast("No se pudo crear el día: " + err.message);
     } finally {
       setCreandoDia(false);
     }
@@ -887,7 +1013,7 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
       );
       setNewExercise({ ...newExercise, nuevoNombre: "", targetWeight: "" });
     } catch (err) {
-      alert("No se pudo agregar el ejercicio: " + err.message);
+      toast("No se pudo agregar el ejercicio: " + err.message);
     }
   };
 
@@ -910,10 +1036,10 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
         ),
       }));
       setAlumnos((prev) => prev.map((a) => (a.id === asignarAlumnoId ? { ...a, rutinaId: rutina.id, days: nuevosDias } : a)));
-      alert("Rutina asignada correctamente.");
+      toast("Rutina asignada correctamente.", "success");
       setAsignarAlumnoId("");
     } catch (err) {
-      alert("No se pudo asignar la plantilla: " + err.message);
+      toast("No se pudo asignar la plantilla: " + err.message);
     } finally {
       setAsignando(false);
     }
@@ -929,7 +1055,7 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
       );
       setEditandoNombre(false);
     } catch (err) {
-      alert("No se pudo renombrar la plantilla: " + err.message);
+      toast("No se pudo renombrar la plantilla: " + err.message);
     } finally {
       setGuardandoNombre(false);
     }
@@ -937,14 +1063,18 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
 
   const eliminarPlantillaActual = async () => {
     if (!selectedId || !selected) return;
-    if (!confirm(`¿Borrar la plantilla "${selected.nombre}"? Esto no afecta a los alumnos que ya la tengan asignada, solo elimina la plantilla en sí.`)) return;
+    const confirmado = await confirmar(
+      `¿Borrar la plantilla "${selected.nombre}"? Esto no afecta a los alumnos que ya la tengan asignada, solo elimina la plantilla en sí.`,
+      { confirmText: "Borrar", cancelText: "Cancelar" }
+    );
+    if (!confirmado) return;
     setEliminando(true);
     try {
       await api.eliminarPlantilla(selectedId);
       setPlantillas((prev) => prev.filter((p) => p.id !== selectedId));
       setSelectedId(null);
     } catch (err) {
-      alert("No se pudo borrar la plantilla: " + err.message);
+      toast("No se pudo borrar la plantilla: " + err.message);
     } finally {
       setEliminando(false);
     }
@@ -1205,6 +1335,7 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
 }
 
 function ProfesorView({ alumnos, setAlumnos, usuario }) {
+  const { toast, confirmar } = useNotify();
   const [section, setSection] = useState("alumnos");
   const [selectedId, setSelectedId] = useState(alumnos[0]?.id);
   const [newExercise, setNewExercise] = useState({ dayIdx: 0, ejercicioId: "__nuevo__", nuevoNombre: "", sets: "3", reps: "10", targetWeight: "", restSets: "60", restAfter: "90" });
@@ -1230,7 +1361,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
       setCredencialesNuevoAlumno({ email: newAlumno.email, password });
       setNewAlumno({ nombre: "", email: "" });
     } catch (err) {
-      alert("No se pudo crear el alumno: " + err.message);
+      toast("No se pudo crear el alumno: " + err.message);
     } finally {
       setCreandoAlumno(false);
     }
@@ -1250,7 +1381,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
       );
       setNewDay({ nombre: "", foco: "" });
     } catch (err) {
-      alert("No se pudo crear el día: " + err.message);
+      toast("No se pudo crear el día: " + err.message);
     } finally {
       setCreandoDia(false);
     }
@@ -1310,7 +1441,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
       );
       setNewExercise({ ...newExercise, nuevoNombre: "", targetWeight: "" });
     } catch (err) {
-      alert("No se pudo agregar el ejercicio: " + err.message);
+      toast("No se pudo agregar el ejercicio: " + err.message);
     }
   };
 
@@ -1327,7 +1458,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
         })
       );
     } catch (err) {
-      alert("No se pudo borrar el ejercicio: " + err.message);
+      toast("No se pudo borrar el ejercicio: " + err.message);
     }
   };
 
@@ -1361,7 +1492,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
         })
       );
     } catch (err) {
-      alert("No se pudo guardar el comentario: " + err.message);
+      toast("No se pudo guardar el comentario: " + err.message);
     }
   };
 
@@ -1918,6 +2049,7 @@ function ProgresoView({ alumnoId }) {
 }
 
 function RMCalculator({ alumno }) {
+  const { toast } = useNotify();
   const allExercises = [];
   alumno.days.forEach((d) =>
     d.exercises.forEach((e) => {
@@ -1953,7 +2085,7 @@ function RMCalculator({ alumno }) {
       });
       setGuardado(true);
     } catch (err) {
-      alert("No se pudo guardar la RM: " + err.message);
+      toast("No se pudo guardar la RM: " + err.message);
     } finally {
       setGuardando(false);
     }
@@ -2112,6 +2244,7 @@ function SessionStopwatch({ elapsed, running, onStart, onPause, onReset }) {
 }
 
 function AlumnoView({ alumno, setAlumnos }) {
+  const { toast } = useNotify();
   const [section, setSection] = useState("inicio");
   const [dayIdx, setDayIdx] = useState(0);
   const [restTimer, setRestTimer] = useState(null);
@@ -2154,7 +2287,7 @@ function AlumnoView({ alumno, setAlumnos }) {
   const pausarCronometro = () => {
     setSessionTimer((p) => ({ ...p, running: false }));
     api.guardarDuracionSesion({ dayId: day.dayId, alumnoId: alumno.id, segundos: sessionTimer.elapsed }).catch((err) =>
-      alert("No se pudo guardar la duración: " + err.message)
+      toast("No se pudo guardar la duración: " + err.message)
     );
   };
 
@@ -2167,7 +2300,7 @@ function AlumnoView({ alumno, setAlumnos }) {
       })
     );
     api.guardarBorg({ dayId: day.dayId, alumnoId: alumno.id, valor: value }).catch((err) =>
-      alert("No se pudo guardar el esfuerzo percibido: " + err.message)
+      toast("No se pudo guardar el esfuerzo percibido: " + err.message)
     );
   };
 
@@ -2186,7 +2319,7 @@ function AlumnoView({ alumno, setAlumnos }) {
     );
     api
       .marcarEjercicio({ dayId: day.dayId, alumnoId: alumno.id, diaEjercicioId: exId, hecho: !actual })
-      .catch((err) => alert("No se pudo guardar: " + err.message));
+      .catch((err) => toast("No se pudo guardar: " + err.message));
   };
 
   const updateLog = (exId, field, value) => {
@@ -2208,7 +2341,7 @@ function AlumnoView({ alumno, setAlumnos }) {
     if (!ex) return;
     api
       .guardarLog({ dayId: day.dayId, alumnoId: alumno.id, diaEjercicioId: exId, pesoLogrado: ex.logWeight, repsLogradas: ex.logReps })
-      .catch((err) => alert("No se pudo guardar el registro: " + err.message));
+      .catch((err) => toast("No se pudo guardar el registro: " + err.message));
   };
 
   const toggleComments = (exId) => {
@@ -2241,7 +2374,7 @@ function AlumnoView({ alumno, setAlumnos }) {
         })
       );
     } catch (err) {
-      alert("No se pudo guardar el comentario: " + err.message);
+      toast("No se pudo guardar el comentario: " + err.message);
     }
   };
 
@@ -2495,7 +2628,7 @@ function AlumnoView({ alumno, setAlumnos }) {
   );
 }
 
-export default function App() {
+function AppInner() {
   const [session, setSession] = useState(undefined); // undefined = todavía no sabemos
   const [usuario, setUsuario] = useState(null);
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
@@ -2590,5 +2723,13 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <NotificationProvider>
+      <AppInner />
+    </NotificationProvider>
   );
 }
