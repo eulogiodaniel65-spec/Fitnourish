@@ -1334,9 +1334,127 @@ function PlantillasManager({ alumnos, setAlumnos, catalogo }) {
   );
 }
 
+function InicioProfesor({ usuario, alumnos }) {
+  const [datos, setDatos] = useState(null);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    if (alumnos.length === 0) {
+      setDatos({ activosEstaSemana: 0, sesionesEstaSemana: 0, masFlojo: null });
+      setCargando(false);
+      return;
+    }
+    setCargando(true);
+    Promise.all(alumnos.map((a) => api.fetchHistorialSesiones(a.id).then((sesiones) => ({ alumno: a, sesiones }))))
+      .then((resultados) => {
+        const hoy = new Date();
+        const diaSemana = hoy.getDay() === 0 ? 7 : hoy.getDay();
+        const inicioSemana = new Date(hoy);
+        inicioSemana.setDate(hoy.getDate() - (diaSemana - 1));
+        inicioSemana.setHours(0, 0, 0, 0);
+
+        let activosEstaSemana = 0;
+        let sesionesEstaSemana = 0;
+        let masFlojo = null; // { alumno, diasSinEntrenar } o { alumno, nunca: true }
+
+        resultados.forEach(({ alumno, sesiones }) => {
+          const estaSemana = sesiones.filter((s) => new Date(s.fecha + "T00:00:00") >= inicioSemana);
+          if (estaSemana.length > 0) activosEstaSemana += 1;
+          sesionesEstaSemana += estaSemana.length;
+
+          if (sesiones.length === 0) {
+            if (!masFlojo || !masFlojo.nunca) {
+              masFlojo = { alumno, nunca: true, diasSinEntrenar: Infinity };
+            }
+          } else {
+            const ultima = sesiones.reduce((max, s) => (s.fecha > max ? s.fecha : max), sesiones[0].fecha);
+            const diasSinEntrenar = Math.floor((hoy - new Date(ultima + "T00:00:00")) / (1000 * 60 * 60 * 24));
+            if (!masFlojo || (!masFlojo.nunca && diasSinEntrenar > masFlojo.diasSinEntrenar)) {
+              masFlojo = { alumno, nunca: false, diasSinEntrenar };
+            }
+          }
+        });
+
+        setDatos({ activosEstaSemana, sesionesEstaSemana, masFlojo });
+      })
+      .catch(() => setDatos({ activosEstaSemana: 0, sesionesEstaSemana: 0, masFlojo: null }))
+      .finally(() => setCargando(false));
+  }, [alumnos.length]);
+
+  return (
+    <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <div
+        style={{
+          backgroundImage: `linear-gradient(180deg, rgba(14,16,19,0.2) 0%, rgba(14,16,19,0.45) 60%, rgba(14,16,19,0.85) 100%), url(${HERO_IMG})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center top",
+          backgroundRepeat: "no-repeat",
+          aspectRatio: "900 / 1124",
+          borderRadius: 20,
+          padding: 20,
+          boxSizing: "border-box",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <div
+          className="flex items-center gap-4 mb-5 p-5 rounded-2xl"
+          style={{ background: "rgba(20, 22, 26, 0.5)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
+          <img src={LOGO_ICON} alt="Fitnourish" style={{ height: 44, width: "auto" }} />
+          <div>
+            <div style={{ fontFamily: "Bebas Neue", fontSize: 26, letterSpacing: 1, color: COLORS.text, lineHeight: 1 }}>
+              {saludoSegunHora()}, {usuario.nombre.split(" ")[0]}
+            </div>
+            <div style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.accent, marginTop: 6 }}>
+              💡 {consejoDeHoy()}
+            </div>
+          </div>
+        </div>
+
+        {cargando ? (
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.text }}>Cargando el resumen...</span>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div style={{ background: "rgba(20, 22, 26, 0.5)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontFamily: "Bebas Neue", fontSize: 30, color: COLORS.accent }}>
+                  {datos.activosEstaSemana} / {alumnos.length}
+                </div>
+                <div style={{ fontFamily: "Inter", fontSize: 11, color: COLORS.text, marginTop: 4 }}>Alumnos activos esta semana</div>
+              </div>
+              <div style={{ background: "rgba(20, 22, 26, 0.5)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 12, padding: 16 }}>
+                <div style={{ fontFamily: "Bebas Neue", fontSize: 30, color: COLORS.accent }}>{datos.sesionesEstaSemana}</div>
+                <div style={{ fontFamily: "Inter", fontSize: 11, color: COLORS.text, marginTop: 4 }}>Sesiones registradas esta semana</div>
+              </div>
+            </div>
+
+            {datos.masFlojo && (
+              <div
+                className="flex items-center gap-3 p-4 rounded-xl"
+                style={{ background: "rgba(226,74,59,0.18)", backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", border: `1px solid ${COLORS.danger}` }}
+              >
+                <Flame size={22} color={COLORS.danger} style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontFamily: "Inter", fontSize: 13, fontWeight: 600, color: COLORS.text }}>{datos.masFlojo.alumno.name}</div>
+                  <div style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.text, opacity: 0.85 }}>
+                    {datos.masFlojo.nunca
+                      ? "Todavía no registró ninguna sesión"
+                      : `${datos.masFlojo.diasSinEntrenar} día${datos.masFlojo.diasSinEntrenar === 1 ? "" : "s"} sin entrenar · quizás valga un mensaje`}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfesorView({ alumnos, setAlumnos, usuario }) {
   const { toast, confirmar } = useNotify();
-  const [section, setSection] = useState("alumnos");
+  const [section, setSection] = useState("inicio");
   const [selectedId, setSelectedId] = useState(alumnos[0]?.id);
   const [newExercise, setNewExercise] = useState({ dayIdx: 0, ejercicioId: "__nuevo__", nuevoNombre: "", sets: "3", reps: "10", targetWeight: "", restSets: "60", restAfter: "90" });
   const [newAlumno, setNewAlumno] = useState({ nombre: "", email: "" });
@@ -1500,6 +1618,17 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
     <div className="w-full">
       <div className="flex gap-1 p-1 rounded-full mb-6" style={{ background: COLORS.surface, width: "fit-content" }}>
         <button
+          onClick={() => setSection("inicio")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+          style={{
+            fontFamily: "Inter", fontSize: 13, fontWeight: 600,
+            background: section === "inicio" ? COLORS.accent : "transparent",
+            color: section === "inicio" ? "#101215" : COLORS.dim,
+          }}
+        >
+          <Home size={14} /> Inicio
+        </button>
+        <button
           onClick={() => setSection("alumnos")}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
           style={{
@@ -1534,7 +1663,9 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
         </button>
       </div>
 
-      {section === "catalogo" ? (
+      {section === "inicio" ? (
+        <InicioProfesor usuario={usuario} alumnos={alumnos} />
+      ) : section === "catalogo" ? (
         <CatalogoManager catalogo={catalogo} setCatalogo={setCatalogo} />
       ) : section === "plantillas" ? (
         <PlantillasManager alumnos={alumnos} setAlumnos={setAlumnos} catalogo={catalogo} />
