@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useContext, createContext } from "react";
-import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays, Home, X, CheckCircle2, AlertCircle } from "lucide-react";
+import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays, Home, X, CheckCircle2, AlertCircle, Settings } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase, obtenerUsuarioActual, cerrarSesion } from "./lib/supabaseClient";
 import * as api from "./lib/api";
@@ -1452,7 +1452,129 @@ function InicioProfesor({ usuario, alumnos }) {
   );
 }
 
-function ProfesorView({ alumnos, setAlumnos, usuario }) {
+function MiPerfil({ usuario, setUsuario }) {
+  const { toast } = useNotify();
+  const [form, setForm] = useState({
+    nombre: usuario.nombre || "",
+    nombreNegocio: usuario.nombre_negocio || "",
+    telefono: usuario.telefono || "",
+  });
+  const [guardando, setGuardando] = useState(false);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
+
+  const guardar = async () => {
+    if (!form.nombre.trim()) return;
+    setGuardando(true);
+    try {
+      const actualizado = await api.actualizarPerfil({
+        usuarioId: usuario.id,
+        nombre: form.nombre,
+        nombreNegocio: form.nombreNegocio,
+        telefono: form.telefono,
+      });
+      setUsuario((prev) => ({ ...prev, ...actualizado }));
+      toast("Perfil actualizado.", "success");
+    } catch (err) {
+      toast("No se pudo guardar el perfil: " + err.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const subirFoto = async (file) => {
+    if (!file) return;
+    setSubiendoFoto(true);
+    try {
+      const actualizado = await api.subirFotoPerfil({ usuarioId: usuario.id, file });
+      setUsuario((prev) => ({ ...prev, ...actualizado }));
+      toast("Foto actualizada.", "success");
+    } catch (err) {
+      toast("No se pudo subir la foto: " + err.message);
+    } finally {
+      setSubiendoFoto(false);
+    }
+  };
+
+  const inputStyle = {
+    width: "100%",
+    background: COLORS.surface2,
+    color: COLORS.text,
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 6,
+    padding: "8px 10px",
+    fontFamily: "Inter",
+    fontSize: 14,
+    boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ maxWidth: 480 }}>
+      <div className="flex items-center gap-2 mb-5">
+        <Settings size={20} color={COLORS.accent} />
+        <span style={{ fontFamily: "Bebas Neue", fontSize: 26, letterSpacing: 1, color: COLORS.text }}>Mi perfil</span>
+      </div>
+
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 20 }}>
+        <div className="flex items-center gap-4 mb-6">
+          <div
+            className="flex items-center justify-center shrink-0"
+            style={{ width: 72, height: 72, borderRadius: "50%", background: COLORS.surface2, border: `1px solid ${COLORS.border}`, overflow: "hidden" }}
+          >
+            {usuario.foto_url ? (
+              <img src={usuario.foto_url} alt={form.nombre} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            ) : (
+              <User size={28} color={COLORS.dim} />
+            )}
+          </div>
+          <label
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md cursor-pointer"
+            style={{ background: COLORS.surface2, border: `1px solid ${COLORS.border}`, fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}
+          >
+            <Video size={13} />
+            {subiendoFoto ? "Subiendo..." : usuario.foto_url ? "Cambiar foto" : "Subir foto"}
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              disabled={subiendoFoto}
+              onChange={(ev) => subirFoto(ev.target.files?.[0])}
+            />
+          </label>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div>
+            <label style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim, display: "block", marginBottom: 6 }}>Tu nombre</label>
+            <input value={form.nombre} onChange={(ev) => setForm({ ...form, nombre: ev.target.value })} style={inputStyle} placeholder="Ej: Daniel Pérez" />
+          </div>
+          <div>
+            <label style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim, display: "block", marginBottom: 6 }}>Nombre del negocio</label>
+            <input value={form.nombreNegocio} onChange={(ev) => setForm({ ...form, nombreNegocio: ev.target.value })} style={inputStyle} placeholder="Ej: Daniel Training" />
+          </div>
+          <div>
+            <label style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim, display: "block", marginBottom: 6 }}>Teléfono / WhatsApp de contacto</label>
+            <input value={form.telefono} onChange={(ev) => setForm({ ...form, telefono: ev.target.value })} style={inputStyle} placeholder="Ej: +54 9 11 1234-5678" />
+          </div>
+          <div>
+            <label style={{ fontFamily: "Inter", fontSize: 12, color: COLORS.dim, display: "block", marginBottom: 6 }}>Email</label>
+            <input value={usuario.email} disabled style={{ ...inputStyle, opacity: 0.6, cursor: "not-allowed" }} />
+          </div>
+
+          <button
+            onClick={guardar}
+            disabled={guardando}
+            className="px-4 py-2 rounded-md"
+            style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600, opacity: guardando ? 0.6 : 1, alignSelf: "flex-start" }}
+          >
+            {guardando ? "Guardando..." : "Guardar cambios"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfesorView({ alumnos, setAlumnos, usuario, setUsuario }) {
   const { toast, confirmar } = useNotify();
   const [section, setSection] = useState("inicio");
   const [selectedId, setSelectedId] = useState(alumnos[0]?.id);
@@ -1661,10 +1783,23 @@ function ProfesorView({ alumnos, setAlumnos, usuario }) {
         >
           <Video size={14} /> Catálogo de ejercicios
         </button>
+        <button
+          onClick={() => setSection("perfil")}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+          style={{
+            fontFamily: "Inter", fontSize: 13, fontWeight: 600,
+            background: section === "perfil" ? COLORS.accent : "transparent",
+            color: section === "perfil" ? "#101215" : COLORS.dim,
+          }}
+        >
+          <Settings size={14} /> Mi perfil
+        </button>
       </div>
 
       {section === "inicio" ? (
         <InicioProfesor usuario={usuario} alumnos={alumnos} />
+      ) : section === "perfil" ? (
+        <MiPerfil usuario={usuario} setUsuario={setUsuario} />
       ) : section === "catalogo" ? (
         <CatalogoManager catalogo={catalogo} setCatalogo={setCatalogo} />
       ) : section === "plantillas" ? (
@@ -2848,7 +2983,7 @@ function AppInner() {
         ) : usuario.rol === "alumno" && alumnos.length === 0 ? (
           <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Todavía no tenés una rutina asignada.</span>
         ) : usuario.rol === "profesor" ? (
-          <ProfesorView alumnos={alumnos} setAlumnos={setAlumnos} usuario={usuario} />
+          <ProfesorView alumnos={alumnos} setAlumnos={setAlumnos} usuario={usuario} setUsuario={setUsuario} />
         ) : (
           <AlumnoView alumno={alumnos[0]} setAlumnos={setAlumnos} />
         )}

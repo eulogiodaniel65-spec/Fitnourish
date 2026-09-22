@@ -630,3 +630,35 @@ export async function fetchDiaEnFecha({ dayId, alumnoId, fecha }) {
     exercises,
   };
 }
+
+// ------------------------------------------------------------
+// Perfil del profesor
+// ------------------------------------------------------------
+
+export async function actualizarPerfil({ usuarioId, nombre, nombreNegocio, telefono }) {
+  const { data, error } = await supabase
+    .from("usuarios")
+    .update({ nombre, nombre_negocio: nombreNegocio || null, telefono: telefono || null })
+    .eq("id", usuarioId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function subirFotoPerfil({ usuarioId, file }) {
+  const ext = file.name.split(".").pop();
+  const path = `${usuarioId}.${ext}`;
+  const { error: upError } = await supabase.storage.from("perfiles").upload(path, file, { upsert: true });
+  if (upError) throw upError;
+  const { data: urlData } = supabase.storage.from("perfiles").getPublicUrl(path);
+  const urlConCache = `${urlData.publicUrl}?t=${Date.now()}`;
+  const { data, error } = await supabase
+    .from("usuarios")
+    .update({ foto_url: urlConCache })
+    .eq("id", usuarioId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
