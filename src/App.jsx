@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useContext, createContext } from "react";
-import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays, Home, X, CheckCircle2, AlertCircle, Settings } from "lucide-react";
+import { Users, User, Plus, Trash2, Check, Flame, ChevronRight, ChevronLeft, MessageSquare, Clock, Video, Send, Calculator, Play, Pause, RotateCcw, LogOut, Layers, Copy, Pencil, TrendingUp, CalendarDays, Home, X, CheckCircle2, AlertCircle, Settings, FileDown, Printer } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { supabase, obtenerUsuarioActual, cerrarSesion } from "./lib/supabaseClient";
 import * as api from "./lib/api";
@@ -1574,6 +1574,191 @@ function MiPerfil({ usuario, setUsuario }) {
   );
 }
 
+function ReportePDF({ tipo, alumno, usuario, onClose }) {
+  const [historialRM, setHistorialRM] = useState([]);
+  const [historialSesiones, setHistorialSesiones] = useState([]);
+  const [cargando, setCargando] = useState(tipo === "progreso");
+
+  useEffect(() => {
+    if (tipo !== "progreso") return;
+    Promise.all([api.fetchHistorialRM(alumno.id), api.fetchHistorialSesiones(alumno.id)])
+      .then(([rm, sesiones]) => {
+        setHistorialRM(rm);
+        setHistorialSesiones(sesiones);
+      })
+      .catch(() => {})
+      .finally(() => setCargando(false));
+  }, [tipo, alumno.id]);
+
+  const fechaHoy = new Date().toLocaleDateString("es-AR", { day: "2-digit", month: "long", year: "numeric" });
+
+  const estiloTitulo = { fontFamily: "Georgia, serif", fontSize: 22, color: "#111", margin: 0 };
+  const estiloSubtitulo = { fontFamily: "Arial, sans-serif", fontSize: 12, color: "#666", marginTop: 4 };
+  const estiloSeccion = { fontFamily: "Georgia, serif", fontSize: 16, color: "#111", marginTop: 28, marginBottom: 10, borderBottom: "2px solid #111", paddingBottom: 4 };
+  const th = { textAlign: "left", padding: "6px 8px", fontFamily: "Arial, sans-serif", fontSize: 11, color: "#fff", background: "#333", textTransform: "uppercase", letterSpacing: 0.5 };
+  const td = { padding: "6px 8px", fontFamily: "Arial, sans-serif", fontSize: 12, color: "#222", borderBottom: "1px solid #ddd" };
+
+  const diasEstaSemana = tipo === "progreso" ? historialSesiones.length : 0;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 2000, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "30px 16px" }}>
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          #reporte-imprimible, #reporte-imprimible * { visibility: visible; }
+          #reporte-imprimible { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; }
+          .no-imprimir { display: none !important; }
+        }
+      `}</style>
+
+      <div style={{ background: "#fff", width: "100%", maxWidth: 720, borderRadius: 10, overflow: "hidden" }}>
+        <div className="no-imprimir flex items-center justify-between px-5 py-3" style={{ background: COLORS.surface2, borderBottom: `1px solid ${COLORS.border}` }}>
+          <span style={{ fontFamily: "Inter", fontSize: 13, color: COLORS.dim }}>Vista previa del PDF</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md"
+              style={{ background: COLORS.accent, color: "#101215", fontFamily: "Inter", fontSize: 13, fontWeight: 600 }}
+            >
+              <Printer size={14} /> Imprimir / Guardar PDF
+            </button>
+            <button
+              onClick={onClose}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md"
+              style={{ background: COLORS.surface, color: COLORS.dim, fontFamily: "Inter", fontSize: 13 }}
+            >
+              <X size={14} /> Cerrar
+            </button>
+          </div>
+        </div>
+
+        <div id="reporte-imprimible" style={{ padding: "36px 40px" }}>
+          <div className="flex items-center justify-between" style={{ borderBottom: "3px solid #111", paddingBottom: 16 }}>
+            <div>
+              <h1 style={estiloTitulo}>Fitnourish</h1>
+              <div style={estiloSubtitulo}>Entrena con ciencia</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#666" }}>{fechaHoy}</div>
+              {usuario?.nombre_negocio && <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#666" }}>{usuario.nombre_negocio}</div>}
+              {usuario?.telefono && <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#666" }}>{usuario.telefono}</div>}
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontFamily: "Arial, sans-serif", fontSize: 11, color: "#888", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              {tipo === "rutina" ? "Rutina de entrenamiento" : "Reporte de progreso"}
+            </div>
+            <div style={{ fontFamily: "Georgia, serif", fontSize: 20, color: "#111", marginTop: 2 }}>{alumno.name}</div>
+          </div>
+
+          {tipo === "rutina" ? (
+            alumno.days.map((d) => (
+              <div key={d.dayId}>
+                <div style={estiloSeccion}>{d.day}{d.focus ? ` — ${d.focus}` : ""}</div>
+                {d.exercises.length === 0 ? (
+                  <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#999" }}>Sin ejercicios cargados.</div>
+                ) : (
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Ejercicio</th>
+                        <th style={th}>Series</th>
+                        <th style={th}>Reps</th>
+                        <th style={th}>Peso</th>
+                        <th style={th}>Descanso</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {d.exercises.map((e) => (
+                        <tr key={e.id}>
+                          <td style={td}>{e.name}</td>
+                          <td style={td}>{e.sets}</td>
+                          <td style={td}>{e.reps}</td>
+                          <td style={td}>{e.targetWeight}</td>
+                          <td style={td}>{e.restSets}s / {e.restAfter}s</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            ))
+          ) : cargando ? (
+            <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#999", marginTop: 20 }}>Cargando datos...</div>
+          ) : (
+            <>
+              <div style={estiloSeccion}>Resumen</div>
+              <div className="flex gap-6">
+                <div>
+                  <div style={{ fontFamily: "Georgia, serif", fontSize: 26, color: "#111" }}>{diasEstaSemana}</div>
+                  <div style={{ fontFamily: "Arial, sans-serif", fontSize: 11, color: "#666" }}>Sesiones registradas en total</div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: "Georgia, serif", fontSize: 26, color: "#111" }}>{historialRM.length}</div>
+                  <div style={{ fontFamily: "Arial, sans-serif", fontSize: 11, color: "#666" }}>Cálculos de RM guardados</div>
+                </div>
+              </div>
+
+              <div style={estiloSeccion}>Historial de RM</div>
+              {historialRM.length === 0 ? (
+                <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#999" }}>Todavía no hay registros de RM.</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Fecha</th>
+                      <th style={th}>Ejercicio</th>
+                      <th style={th}>RM estimada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historialRM.map((r) => (
+                      <tr key={r.id}>
+                        <td style={td}>{new Date(r.fecha).toLocaleDateString("es-AR")}</td>
+                        <td style={td}>{r.ejercicios?.nombre}</td>
+                        <td style={td}>{parseFloat(r.rm_estimado).toFixed(1)} kg</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+              <div style={estiloSeccion}>Historial de sesiones</div>
+              {historialSesiones.length === 0 ? (
+                <div style={{ fontFamily: "Arial, sans-serif", fontSize: 12, color: "#999" }}>Todavía no hay sesiones registradas.</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={th}>Fecha</th>
+                      <th style={th}>Duración</th>
+                      <th style={th}>Esfuerzo (Borg)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {historialSesiones.map((s, i) => (
+                      <tr key={i}>
+                        <td style={td}>{new Date(s.fecha).toLocaleDateString("es-AR")}</td>
+                        <td style={td}>{s.duracion_segundos ? `${Math.round(s.duracion_segundos / 60)} min` : "—"}</td>
+                        <td style={td}>{s.esfuerzo_percibido_borg ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+
+          <div style={{ marginTop: 36, paddingTop: 14, borderTop: "1px solid #ddd", fontFamily: "Arial, sans-serif", fontSize: 10, color: "#999", textAlign: "center" }}>
+            Generado con Fitnourish
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProfesorView({ alumnos, setAlumnos, usuario, setUsuario }) {
   const { toast, confirmar } = useNotify();
   const [section, setSection] = useState("inicio");
@@ -1586,6 +1771,7 @@ function ProfesorView({ alumnos, setAlumnos, usuario, setUsuario }) {
   const [creandoDia, setCreandoDia] = useState(false);
   const [catalogo, setCatalogo] = useState([]);
   const [vistaAlumno, setVistaAlumno] = useState("rutina");
+  const [mostrarReporte, setMostrarReporte] = useState(null); // "rutina" | "progreso" | null
   const selected = alumnos.find((a) => a.id === selectedId);
 
   useEffect(() => {
@@ -1909,7 +2095,19 @@ function ProfesorView({ alumnos, setAlumnos, usuario, setUsuario }) {
               <CalendarDays size={12} /> Calendario
             </button>
           </div>
+          {(vistaAlumno === "rutina" || vistaAlumno === "progreso") && (
+            <button
+              onClick={() => setMostrarReporte(vistaAlumno)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md ml-auto"
+              style={{ background: COLORS.surface, color: COLORS.dim, fontFamily: "Inter", fontSize: 12, fontWeight: 600, border: `1px solid ${COLORS.border}` }}
+            >
+              <FileDown size={13} /> Exportar PDF
+            </button>
+          )}
         </div>
+        {mostrarReporte && (
+          <ReportePDF tipo={mostrarReporte} alumno={selected} usuario={usuario} onClose={() => setMostrarReporte(null)} />
+        )}
         {vistaAlumno === "progreso" ? (
           <ProgresoView alumnoId={selected.id} />
         ) : vistaAlumno === "calendario" ? (
